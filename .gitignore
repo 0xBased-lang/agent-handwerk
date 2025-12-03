@@ -77,6 +77,8 @@ coverage.xml
 # AI MODELS (downloaded separately)
 # =============================================================================
 models/
+# Exception for ORM models
+!src/phone_agent/db/models/
 *.gguf
 *.bin
 *.pt

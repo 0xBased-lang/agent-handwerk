@@ -8,7 +8,7 @@ Extends BaseRepository with compliance-specific queries.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Sequence, Any
 from uuid import UUID
 
@@ -99,7 +99,7 @@ class ConsentRepository(BaseRepository[ConsentModel]):
         Returns:
             List of active consent records
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         stmt = (
             select(self._model)
             .where(
@@ -131,7 +131,7 @@ class ConsentRepository(BaseRepository[ConsentModel]):
         Returns:
             True if valid consent exists
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         stmt = (
             select(func.count())
             .select_from(self._model)
@@ -187,7 +187,7 @@ class ConsentRepository(BaseRepository[ConsentModel]):
         Returns:
             List of expiring consent records
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         future = now + timedelta(days=days_ahead)
 
         stmt = (

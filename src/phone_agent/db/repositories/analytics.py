@@ -5,7 +5,7 @@ Provides aggregation queries and KPI calculations.
 """
 from __future__ import annotations
 
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from typing import Sequence, Any
 from uuid import UUID
 
@@ -520,7 +520,7 @@ class DashboardSnapshotRepository(BaseRepository[DashboardSnapshotModel]):
         Returns:
             List of snapshots
         """
-        cutoff = datetime.utcnow() - timedelta(hours=hours)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
         conditions = [
             self._model.snapshot_type == snapshot_type,
             self._model.snapshot_at >= cutoff,
@@ -560,7 +560,7 @@ class DashboardSnapshotRepository(BaseRepository[DashboardSnapshotModel]):
 
         snapshot = DashboardSnapshotModel(
             id=uuid4(),
-            snapshot_at=datetime.utcnow(),
+            snapshot_at=datetime.now(timezone.utc),
             snapshot_type=snapshot_type,
             industry=industry,
             tenant_id=tenant_id,
@@ -585,7 +585,7 @@ class DashboardSnapshotRepository(BaseRepository[DashboardSnapshotModel]):
         Returns:
             Number of deleted snapshots
         """
-        cutoff = datetime.utcnow() - timedelta(days=days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
         # Use direct SQLAlchemy delete for bulk operation
         from sqlalchemy import delete

@@ -5,7 +5,7 @@ Extends BaseRepository with contact-specific queries.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Sequence, Any
 from uuid import UUID
 
@@ -343,7 +343,7 @@ class ContactRepository(BaseRepository[ContactModel]):
         Returns:
             List of recently active contacts
         """
-        cutoff = datetime.utcnow() - timedelta(days=days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         conditions = [
             self._model.last_contact_at >= cutoff,
             self._model.is_deleted == False,
@@ -380,7 +380,7 @@ class ContactRepository(BaseRepository[ContactModel]):
         Returns:
             List of inactive contacts
         """
-        cutoff = datetime.utcnow() - timedelta(days=days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         conditions = [
             or_(
                 self._model.last_contact_at < cutoff,
@@ -419,7 +419,7 @@ class ContactRepository(BaseRepository[ContactModel]):
         Returns:
             List of new contacts
         """
-        cutoff = datetime.utcnow() - timedelta(days=days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         conditions = [
             self._model.created_at >= cutoff,
             self._model.is_deleted == False,
@@ -456,7 +456,7 @@ class ContactRepository(BaseRepository[ContactModel]):
         Returns:
             List of patients due for recall
         """
-        cutoff = datetime.utcnow() - timedelta(days=days_since_last_appointment)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days_since_last_appointment)
         stmt = (
             select(self._model)
             .where(
@@ -564,14 +564,14 @@ class ContactRepository(BaseRepository[ContactModel]):
         total = total_result.scalar() or 0
 
         # New this week
-        week_ago = datetime.utcnow() - timedelta(days=7)
+        week_ago = datetime.now(timezone.utc) - timedelta(days=7)
         new_conditions = conditions + [self._model.created_at >= week_ago]
         new_stmt = select(func.count()).select_from(self._model).where(and_(*new_conditions))
         new_result = await self._session.execute(new_stmt)
         new_this_week = new_result.scalar() or 0
 
         # Active (contacted in last 30 days)
-        month_ago = datetime.utcnow() - timedelta(days=30)
+        month_ago = datetime.now(timezone.utc) - timedelta(days=30)
         active_conditions = conditions + [self._model.last_contact_at >= month_ago]
         active_stmt = select(func.count()).select_from(self._model).where(and_(*active_conditions))
         active_result = await self._session.execute(active_stmt)
@@ -631,11 +631,11 @@ class ContactRepository(BaseRepository[ContactModel]):
         if contact is None:
             return None
 
-        contact.last_contact_at = datetime.utcnow()
+        contact.last_contact_at = datetime.now(timezone.utc)
         contact.total_calls += 1
 
         if contact.first_contact_at is None:
-            contact.first_contact_at = datetime.utcnow()
+            contact.first_contact_at = datetime.now(timezone.utc)
 
         await self._session.flush()
         return contact
@@ -656,7 +656,7 @@ class ContactRepository(BaseRepository[ContactModel]):
             return None
 
         contact.total_appointments += 1
-        contact.last_appointment_at = datetime.utcnow()
+        contact.last_appointment_at = datetime.now(timezone.utc)
 
         await self._session.flush()
         return contact

@@ -5,7 +5,7 @@ Extends BaseRepository with appointment-specific queries.
 """
 from __future__ import annotations
 
-from datetime import datetime, date, time, timedelta
+from datetime import datetime, date, time, timedelta, timezone
 from typing import Sequence, Any
 from uuid import UUID
 
@@ -399,7 +399,7 @@ class AppointmentRepository(BaseRepository[AppointmentModel]):
         Returns:
             List of appointments needing reminders
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         reminder_cutoff = now + timedelta(hours=hours_ahead)
 
         # Convert to date and time for comparison
@@ -437,7 +437,7 @@ class AppointmentRepository(BaseRepository[AppointmentModel]):
         """
         return await self.update(appointment_id, {
             "reminder_sent": True,
-            "reminder_sent_at": datetime.utcnow(),
+            "reminder_sent_at": datetime.now(timezone.utc),
         })
 
     # ========================================================================

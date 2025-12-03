@@ -239,7 +239,7 @@ class BaseRepository(Generic[ModelT]):
         Returns:
             Soft-deleted model instance or None
         """
-        from datetime import datetime
+        from datetime import datetime, timezone
 
         db_obj = await self.get(id)
         if db_obj is None:
@@ -248,7 +248,7 @@ class BaseRepository(Generic[ModelT]):
         if hasattr(db_obj, "is_deleted"):
             db_obj.is_deleted = True
         if hasattr(db_obj, "deleted_at"):
-            db_obj.deleted_at = datetime.utcnow()
+            db_obj.deleted_at = datetime.now(timezone.utc)
 
         await self._session.flush()
         await self._session.refresh(db_obj)

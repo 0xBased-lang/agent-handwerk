@@ -5,7 +5,7 @@ Extends BaseRepository with call-specific queries.
 """
 from __future__ import annotations
 
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from typing import Sequence, Any
 from uuid import UUID
 
@@ -177,7 +177,7 @@ class CallRepository(BaseRepository[CallModel]):
         Returns:
             List of recent calls
         """
-        cutoff = datetime.utcnow() - timedelta(days=days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         stmt = (
             select(self._model)
             .where(
