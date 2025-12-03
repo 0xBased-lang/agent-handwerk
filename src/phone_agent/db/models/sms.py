@@ -7,7 +7,7 @@ Supports multiple providers (Twilio, sipgate) with unified status tracking.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -263,19 +263,19 @@ class SMSMessageModel(Base, UUIDMixin, TimestampMixin):
     def mark_queued(self) -> None:
         """Mark message as queued for sending."""
         self.status = "queued"
-        self.queued_at = datetime.now()
+        self.queued_at = datetime.now(timezone.utc)
 
     def mark_sent(self, provider_message_id: str | None = None) -> None:
         """Mark message as sent to carrier."""
         self.status = "sent"
-        self.sent_at = datetime.now()
+        self.sent_at = datetime.now(timezone.utc)
         if provider_message_id:
             self.provider_message_id = provider_message_id
 
     def mark_delivered(self) -> None:
         """Mark message as delivered to recipient."""
         self.status = "delivered"
-        self.delivered_at = datetime.now()
+        self.delivered_at = datetime.now(timezone.utc)
 
     def mark_failed(
         self,
@@ -284,7 +284,7 @@ class SMSMessageModel(Base, UUIDMixin, TimestampMixin):
     ) -> None:
         """Mark message as failed."""
         self.status = "failed"
-        self.failed_at = datetime.now()
+        self.failed_at = datetime.now(timezone.utc)
         self.error_code = error_code
         self.error_message = error_message
 
@@ -295,7 +295,7 @@ class SMSMessageModel(Base, UUIDMixin, TimestampMixin):
     ) -> None:
         """Mark message as undelivered (sent but not received)."""
         self.status = "undelivered"
-        self.failed_at = datetime.now()
+        self.failed_at = datetime.now(timezone.utc)
         self.error_code = error_code
         self.error_message = error_message
 
@@ -310,13 +310,9 @@ class SMSMessageModel(Base, UUIDMixin, TimestampMixin):
         """Increment retry count and schedule next retry."""
         self.retry_count += 1
         self.status = "pending"
-        self.next_retry_at = datetime.now() + timedelta(seconds=next_retry_delay_seconds)
+        self.next_retry_at = datetime.now(timezone.utc) + timedelta(seconds=next_retry_delay_seconds)
 
     def record_webhook(self) -> None:
         """Record that a webhook was received."""
         self.webhook_received += 1
-        self.last_webhook_at = datetime.now()
-
-
-# Import timedelta at module level
-from datetime import timedelta
+        self.last_webhook_at = datetime.now(timezone.utc)

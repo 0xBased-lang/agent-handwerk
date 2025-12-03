@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from unittest.mock import MagicMock, AsyncMock, patch
 from uuid import uuid4
 
@@ -334,7 +334,7 @@ class TestSMSMessageModel:
         assert sms.status == "pending"
         assert sms.next_retry_at is not None
         # Check that next_retry_at is roughly 2 minutes from now
-        delta = sms.next_retry_at - datetime.now()
+        delta = sms.next_retry_at - datetime.now(timezone.utc)
         assert 110 <= delta.total_seconds() <= 130
 
     def test_to_dict(self):

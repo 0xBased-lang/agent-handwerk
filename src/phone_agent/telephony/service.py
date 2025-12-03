@@ -36,7 +36,7 @@ class TelephonyServiceConfig:
     # FreeSWITCH (if using)
     freeswitch_host: str = "127.0.0.1"
     freeswitch_port: int = 8021
-    freeswitch_password: str = "ClueCon"
+    freeswitch_password: str = ""  # Required - must be provided from config/environment
 
     # SIP (if using)
     sip_server: str = ""

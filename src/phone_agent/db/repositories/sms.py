@@ -5,7 +5,7 @@ Extends BaseRepository with SMS-specific queries.
 """
 from __future__ import annotations
 
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from typing import Any, Sequence
 from uuid import UUID
 
@@ -140,7 +140,7 @@ class SMSMessageRepository(BaseRepository[SMSMessageModel]):
                     self._model.status == "pending",
                     or_(
                         self._model.next_retry_at.is_(None),
-                        self._model.next_retry_at <= datetime.now(),
+                        self._model.next_retry_at <= datetime.now(timezone.utc),
                     ),
                 )
             )
@@ -194,7 +194,7 @@ class SMSMessageRepository(BaseRepository[SMSMessageModel]):
         Returns:
             List of retryable SMS messages
         """
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         stmt = (
             select(self._model)
             .where(
@@ -375,13 +375,13 @@ class SMSMessageRepository(BaseRepository[SMSMessageModel]):
         sms.record_webhook()
 
         if status == "queued":
-            sms.queued_at = datetime.now()
+            sms.queued_at = datetime.now(timezone.utc)
         elif status == "sent":
-            sms.sent_at = datetime.now()
+            sms.sent_at = datetime.now(timezone.utc)
         elif status == "delivered":
-            sms.delivered_at = datetime.now()
+            sms.delivered_at = datetime.now(timezone.utc)
         elif status in ("failed", "undelivered"):
-            sms.failed_at = datetime.now()
+            sms.failed_at = datetime.now(timezone.utc)
             sms.error_code = error_code
             sms.error_message = error_message
 
