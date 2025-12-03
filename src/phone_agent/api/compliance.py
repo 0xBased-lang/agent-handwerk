@@ -40,6 +40,8 @@ from phone_agent.services.compliance_service import (
     ComplianceService,
     ConsentNotFoundError,
 )
+from phone_agent.integrations.sms.factory import get_sms_gateway
+from phone_agent.integrations.sms.base import SMSMessage
 
 log = get_logger(__name__)
 
@@ -934,17 +936,71 @@ async def reschedule_appointment(
 
     await session.commit()
 
-    # TODO: Send notification if requested and consent exists
+    # Send notification if requested and consent exists
     notification_sent = False
     if data.notify_patient and contact_id:
-        # Check SMS consent and send notification
+        # Check SMS consent
         has_sms_consent = await service.verify_consent(contact_id, "sms_contact")
         if has_sms_consent:
-            # Would integrate with SMS gateway here
-            notification_sent = True
+            try:
+                # Get contact phone number
+                contact_repo = ContactRepository(session)
+                contact = await contact_repo.get(contact_id)
+
+                if contact and contact.phone_primary:
+                    # Format dates in German style
+                    date_str = data.new_date.strftime("%d.%m.%Y")
+                    time_str = data.new_time.strftime("%H:%M")
+
+                    # Build notification message
+                    message_body = (
+                        f"Terminänderung\n\n"
+                        f"Guten Tag{' ' + contact.first_name if contact.first_name else ''},\n"
+                        f"Ihr Termin wurde verschoben auf:\n"
+                        f"{date_str} um {time_str} Uhr\n\n"
+                        f"Bei Rückfragen rufen Sie uns bitte an.\n"
+                        f"Vielen Dank!"
+                    )
+
+                    # Send SMS
+                    gateway = get_sms_gateway()
+                    sms_message = SMSMessage(
+                        to=contact.phone_primary,
+                        body=message_body,
+                        reference=f"reschedule_{appointment_id}",
+                    )
+                    result = await gateway.send(sms_message)
+
+                    if result.success:
+                        notification_sent = True
+                        log.info(
+                            "Reschedule notification sent",
+                            appointment_id=str(appointment_id),
+                            contact_id=str(contact_id),
+                            message_id=result.message_id,
+                        )
+                    else:
+                        log.error(
+                            "Failed to send reschedule notification",
+                            appointment_id=str(appointment_id),
+                            contact_id=str(contact_id),
+                            error=result.error_message,
+                        )
+                else:
+                    log.warning(
+                        "Cannot send notification - contact has no phone",
+                        contact_id=str(contact_id),
+                    )
+            except Exception as e:
+                log.error(
+                    "Error sending reschedule notification",
+                    appointment_id=str(appointment_id),
+                    contact_id=str(contact_id),
+                    error=str(e),
+                )
+        else:
             log.info(
-                "Reschedule notification sent",
-                appointment_id=str(appointment_id),
+                "No SMS consent for reschedule notification",
                 contact_id=str(contact_id),
             )
 

@@ -25,6 +25,8 @@ from phone_agent.api.webhook_security import (
 from phone_agent.dependencies import get_webhook_security
 from phone_agent.db.session import get_db_context
 from phone_agent.db.repositories.sms import SMSMessageRepository
+from phone_agent.db.repositories.contacts import ContactRepository
+from phone_agent.db.repositories.appointments import AppointmentRepository
 from phone_agent.integrations.sms.twilio import TwilioWebhookHandler
 
 log = get_logger(__name__)
@@ -279,16 +281,119 @@ async def _process_inbound_sms(
     # Confirmation keywords (German and English)
     confirmation_keywords = {"JA", "YES", "OK", "BESTÄTIGEN", "CONFIRM", "1"}
     if body_upper in confirmation_keywords:
-        # TODO: Look up pending appointment for this number and confirm it
-        log.info("Appointment confirmation via SMS", from_number=from_number)
-        return "Vielen Dank! Ihr Termin wurde bestätigt. / Thank you! Your appointment has been confirmed."
+        try:
+            async with get_db_context() as session:
+                contact_repo = ContactRepository(session)
+                appointment_repo = AppointmentRepository(session)
+
+                # Find contact by phone number
+                contact = await contact_repo.find_by_phone(from_number)
+                if not contact:
+                    log.warning("Contact not found for SMS confirmation", phone=from_number)
+                    return (
+                        "Entschuldigung, wir konnten Ihre Nummer nicht finden. "
+                        "/ Sorry, we couldn't find your number in our system."
+                    )
+
+                # Find next pending appointment
+                appointment = await appointment_repo.get_next_for_contact(contact.id)
+                if not appointment:
+                    log.info("No pending appointment for SMS confirmation", contact_id=str(contact.id))
+                    return (
+                        "Sie haben keinen ausstehenden Termin. "
+                        "/ You have no pending appointment."
+                    )
+
+                # Check if appointment can be confirmed
+                if appointment.status not in ("scheduled", "pending"):
+                    log.info(
+                        "Appointment not in confirmable status",
+                        appointment_id=str(appointment.id),
+                        status=appointment.status,
+                    )
+                    return (
+                        f"Ihr Termin hat bereits den Status: {appointment.status}. "
+                        f"/ Your appointment status is: {appointment.status}."
+                    )
+
+                # Update status to confirmed
+                await appointment_repo.update(appointment.id, {"status": "confirmed"})
+
+                log.info(
+                    "Appointment confirmed via SMS",
+                    contact_id=str(contact.id),
+                    appointment_id=str(appointment.id),
+                    phone=from_number,
+                )
+
+            return "Vielen Dank! Ihr Termin wurde bestätigt. / Thank you! Your appointment has been confirmed."
+
+        except Exception as e:
+            log.error("Error confirming appointment via SMS", error=str(e), phone=from_number)
+            return (
+                "Ein Fehler ist aufgetreten. Bitte rufen Sie uns an. "
+                "/ An error occurred. Please call us."
+            )
 
     # Cancellation keywords
     cancellation_keywords = {"NEIN", "NO", "ABSAGEN", "CANCEL", "STORNIEREN", "2"}
     if body_upper in cancellation_keywords:
-        # TODO: Look up pending appointment for this number and cancel it
-        log.info("Appointment cancellation via SMS", from_number=from_number)
-        return "Ihr Termin wurde storniert. Bitte rufen Sie uns an für einen neuen Termin. / Your appointment has been cancelled. Please call us for a new appointment."
+        try:
+            async with get_db_context() as session:
+                contact_repo = ContactRepository(session)
+                appointment_repo = AppointmentRepository(session)
+
+                # Find contact by phone number
+                contact = await contact_repo.find_by_phone(from_number)
+                if not contact:
+                    log.warning("Contact not found for SMS cancellation", phone=from_number)
+                    return (
+                        "Entschuldigung, wir konnten Ihre Nummer nicht finden. "
+                        "/ Sorry, we couldn't find your number in our system."
+                    )
+
+                # Find next pending appointment
+                appointment = await appointment_repo.get_next_for_contact(contact.id)
+                if not appointment:
+                    log.info("No pending appointment for SMS cancellation", contact_id=str(contact.id))
+                    return (
+                        "Sie haben keinen ausstehenden Termin zum Absagen. "
+                        "/ You have no pending appointment to cancel."
+                    )
+
+                # Check if appointment can be cancelled
+                if appointment.status not in ("scheduled", "pending", "confirmed"):
+                    log.info(
+                        "Appointment not in cancellable status",
+                        appointment_id=str(appointment.id),
+                        status=appointment.status,
+                    )
+                    return (
+                        f"Ihr Termin kann nicht mehr storniert werden (Status: {appointment.status}). "
+                        f"/ Your appointment cannot be cancelled (status: {appointment.status})."
+                    )
+
+                # Update status to cancelled
+                await appointment_repo.update(appointment.id, {"status": "cancelled"})
+
+                log.info(
+                    "Appointment cancelled via SMS",
+                    contact_id=str(contact.id),
+                    appointment_id=str(appointment.id),
+                    phone=from_number,
+                )
+
+            return (
+                "Ihr Termin wurde storniert. Bitte rufen Sie uns an für einen neuen Termin. "
+                "/ Your appointment has been cancelled. Please call us for a new appointment."
+            )
+
+        except Exception as e:
+            log.error("Error cancelling appointment via SMS", error=str(e), phone=from_number)
+            return (
+                "Ein Fehler ist aufgetreten. Bitte rufen Sie uns an. "
+                "/ An error occurred. Please call us."
+            )
 
     # Help keywords
     help_keywords = {"HILFE", "HELP", "INFO", "?"}
