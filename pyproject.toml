@@ -1,0 +1,110 @@
+[project]
+name = "itf-phone-agent"
+version = "0.1.0"
+description = "AI Phone Agent for German SME healthcare automation"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "IT-Friends Team"}
+]
+
+dependencies = [
+    # Shared library - install manually: pip install -e ../shared-libs
+    # Or run: ./scripts/setup_dev.sh
+
+    # Web framework
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+    "pydantic>=2.5.0",
+
+    # Configuration
+    "dynaconf>=3.2.0",
+    "python-dotenv>=1.0.0",
+
+    # Database
+    "sqlalchemy>=2.0.0",
+    "alembic>=1.13.0",
+    "aiosqlite>=0.19.0",
+
+    # AI - Speech-to-Text
+    "faster-whisper>=0.10.0",
+
+    # AI - LLM
+    "llama-cpp-python>=0.2.0",
+
+    # AI - Text-to-Speech
+    "piper-tts>=1.2.0",
+
+    # AI - Language Detection
+    "speechbrain>=1.0.0",
+
+    # Audio processing
+    "numpy>=1.26.0",
+    "sounddevice>=0.4.6",
+    "scipy>=1.12.0",
+
+    # Telephony (SIP)
+    "aiohttp>=3.9.0",
+
+    # Templating
+    "jinja2>=3.1.0",
+
+    # HTTP client
+    "httpx>=0.26.0",
+
+    # Google Calendar Integration
+    "google-api-python-client>=2.100.0",
+    "google-auth>=2.23.0",
+    "google-auth-httplib2>=0.2.0",
+
+    # Email
+    "aiosmtplib>=3.0.0",
+
+    # Security
+    "slowapi>=0.1.9",
+    "pyjwt>=2.8.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "pytest-mock>=3.12.0",
+    "ruff>=0.2.0",
+    "mypy>=1.8.0",
+    "httpx>=0.26.0",
+]
+
+load-testing = [
+    "locust>=2.20.0",
+    "websockets>=12.0",
+    "psutil>=5.9.0",
+]
+
+[project.scripts]
+phone-agent = "phone_agent.main:run"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/phone_agent"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

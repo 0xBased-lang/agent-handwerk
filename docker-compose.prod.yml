@@ -1,0 +1,276 @@
+version: '3.8'
+
+# IT-Friends Phone Agent - Production Docker Compose
+# ==================================================
+# Full production deployment with monitoring and reverse proxy
+#
+# Usage:
+#   docker compose -f docker-compose.prod.yml up -d
+#   docker compose -f docker-compose.prod.yml --profile monitoring up -d
+
+services:
+  # ===========================================================================
+  # PHONE AGENT (Main Application)
+  # ===========================================================================
+  phone-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - BUILD_DATE=${BUILD_DATE:-}
+        - VERSION=${VERSION:-latest}
+    image: itfriends/phone-agent:${VERSION:-latest}
+    container_name: itf-phone-agent
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      # Configuration (read-only)
+      - ./configs:/app/configs:ro
+      - ./prompts:/app/prompts:ro
+      # AI Models (read-only, downloaded separately)
+      - ./models:/app/models:ro
+      # Database persistence
+      - phone_agent_data:/app/data
+      # Secrets (for credentials files)
+      - ./secrets:/app/secrets:ro
+      # Audio devices (for on-device telephony)
+      - /dev/snd:/dev/snd
+    environment:
+      # Core settings
+      - ITF_ENV=${ITF_ENV:-production}
+      - ITF_DEVICE_ID=${ITF_DEVICE_ID:-}
+      - ITF_LOG_LEVEL=${ITF_LOG_LEVEL:-INFO}
+      - ITF_LOG_JSON=true
+      # Telephony
+      - ITF_TELEPHONY__TWILIO__ENABLED=${ITF_TELEPHONY__TWILIO__ENABLED:-false}
+      - ITF_TELEPHONY__TWILIO__ACCOUNT_SID=${ITF_TELEPHONY__TWILIO__ACCOUNT_SID:-}
+      - ITF_TELEPHONY__TWILIO__AUTH_TOKEN=${ITF_TELEPHONY__TWILIO__AUTH_TOKEN:-}
+      - ITF_TELEPHONY__TWILIO__FROM_NUMBER=${ITF_TELEPHONY__TWILIO__FROM_NUMBER:-}
+      - ITF_TELEPHONY__TWILIO__WEBHOOK_URL=${ITF_TELEPHONY__TWILIO__WEBHOOK_URL:-}
+      - ITF_TELEPHONY__TWILIO__MESSAGING_SERVICE_SID=${ITF_TELEPHONY__TWILIO__MESSAGING_SERVICE_SID:-}
+      # Email
+      - ITF_INTEGRATIONS__EMAIL__ENABLED=${ITF_INTEGRATIONS__EMAIL__ENABLED:-false}
+      - ITF_INTEGRATIONS__EMAIL__PROVIDER=${ITF_INTEGRATIONS__EMAIL__PROVIDER:-sendgrid}
+      - ITF_INTEGRATIONS__EMAIL__FROM_EMAIL=${ITF_INTEGRATIONS__EMAIL__FROM_EMAIL:-}
+      - ITF_INTEGRATIONS__EMAIL__FROM_NAME=${ITF_INTEGRATIONS__EMAIL__FROM_NAME:-}
+      - ITF_INTEGRATIONS__EMAIL__SENDGRID__API_KEY=${ITF_INTEGRATIONS__EMAIL__SENDGRID__API_KEY:-}
+      - ITF_INTEGRATIONS__EMAIL__SENDGRID__WEBHOOK_URL=${ITF_INTEGRATIONS__EMAIL__SENDGRID__WEBHOOK_URL:-}
+      # Calendar
+      - ITF_INTEGRATIONS__CALENDAR__ENABLED=${ITF_INTEGRATIONS__CALENDAR__ENABLED:-true}
+      - ITF_INTEGRATIONS__CALENDAR__TYPE=${ITF_INTEGRATIONS__CALENDAR__TYPE:-local}
+      - ITF_INTEGRATIONS__CALENDAR__GOOGLE__CREDENTIALS_FILE=${ITF_INTEGRATIONS__CALENDAR__GOOGLE__CREDENTIALS_FILE:-}
+    env_file:
+      - .env
+    devices:
+      - /dev/snd:/dev/snd
+    group_add:
+      - audio
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 2G
+    networks:
+      - itf-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.phone-agent.rule=Host(`${DOMAIN:-localhost}`)"
+      - "traefik.http.routers.phone-agent.entrypoints=websecure"
+      - "traefik.http.routers.phone-agent.tls.certresolver=letsencrypt"
+      - "traefik.http.services.phone-agent.loadbalancer.server.port=8080"
+
+  # ===========================================================================
+  # TRAEFIK (Reverse Proxy with SSL)
+  # ===========================================================================
+  traefik:
+    image: traefik:v3.0
+    container_name: itf-traefik
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik_certs:/letsencrypt
+    command:
+      - "--api.dashboard=false"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      - "--certificatesresolvers.letsencrypt.acme.tlschallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:-admin@example.com}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+    networks:
+      - itf-network
+    profiles:
+      - proxy
+
+  # ===========================================================================
+  # POSTGRES (Optional - for multi-device deployment)
+  # ===========================================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: itf-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-phoneagent}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-}
+      POSTGRES_DB: ${DB_NAME:-phone_agent}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-phoneagent}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - itf-network
+    profiles:
+      - postgres
+
+  # ===========================================================================
+  # REDIS (Optional - for caching and rate limiting)
+  # ===========================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: itf-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - itf-network
+    profiles:
+      - redis
+
+  # ===========================================================================
+  # MONITORING STACK
+  # ===========================================================================
+
+  # Prometheus (Metrics Collection)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: itf-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    networks:
+      - itf-network
+    profiles:
+      - monitoring
+
+  # Grafana (Dashboards)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: itf-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    networks:
+      - itf-network
+    profiles:
+      - monitoring
+
+  # Loki (Log Aggregation)
+  loki:
+    image: grafana/loki:latest
+    container_name: itf-loki
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./monitoring/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - itf-network
+    profiles:
+      - monitoring
+
+  # Promtail (Log Shipper)
+  promtail:
+    image: grafana/promtail:latest
+    container_name: itf-promtail
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/log:/var/log:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    command: -config.file=/etc/promtail/config.yml
+    networks:
+      - itf-network
+    profiles:
+      - monitoring
+
+  # Node Exporter (System Metrics)
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: itf-node-exporter
+    restart: unless-stopped
+    network_mode: host
+    pid: host
+    volumes:
+      - /:/host:ro,rslave
+    command:
+      - '--path.rootfs=/host'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    profiles:
+      - monitoring
+
+# =============================================================================
+# NETWORKS
+# =============================================================================
+networks:
+  itf-network:
+    name: itf-phone-agent-network
+    driver: bridge
+
+# =============================================================================
+# VOLUMES
+# =============================================================================
+volumes:
+  phone_agent_data:
+    name: itf_phone_agent_data
+  postgres_data:
+    name: itf_postgres_data
+  redis_data:
+    name: itf_redis_data
+  prometheus_data:
+    name: itf_prometheus_data
+  grafana_data:
+    name: itf_grafana_data
+  loki_data:
+    name: itf_loki_data
+  traefik_certs:
+    name: itf_traefik_certs

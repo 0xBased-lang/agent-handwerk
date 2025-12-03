@@ -1,0 +1,130 @@
+# IT-Friends Phone Agent - Default Configuration
+# Override with environment-specific files or ITF_* environment variables
+
+# Device identification
+device_name: "phone-agent-dev"
+
+# Environment
+environment: development
+debug: true
+
+# Logging
+log_level: INFO
+log_json: false
+
+# API Server
+api_host: "0.0.0.0"
+api_port: 8080
+
+# Remote Management
+remote_enabled: true
+heartbeat_interval: 60
+heartbeat_endpoint: null  # Set to monitoring server URL
+
+# Database
+database:
+  url: "sqlite+aiosqlite:///data/phone_agent.db"
+  echo: false
+
+# AI Models
+ai:
+  # Speech-to-Text (faster-whisper)
+  stt:
+    model: "distil-whisper-large-v3-german"
+    model_path: "models/whisper"
+    device: "cpu"  # or "cuda" for GPU, "auto" for NPU
+    compute_type: "int8"  # int8 for Pi, float16 for GPU
+    language: "de"
+    beam_size: 5
+    vad_filter: true
+
+  # Language Model (llama-cpp)
+  llm:
+    model: "llama-3.2-1b-instruct-q4_k_m.gguf"
+    model_path: "models/llm"
+    n_ctx: 2048
+    n_threads: 4
+    n_gpu_layers: 0  # Set >0 if using accelerator
+    temperature: 0.7
+    max_tokens: 256
+
+  # Text-to-Speech (Piper)
+  tts:
+    model: "de_DE-thorsten-medium"
+    model_path: "models/tts"
+    speaker_id: 0
+    sample_rate: 22050
+
+# Telephony
+telephony:
+  enabled: false  # Enable when SIP is configured
+  sip:
+    server: ""
+    username: ""
+    password: ""
+    port: 5060
+  audio:
+    input_device: "default"
+    output_device: "default"
+    sample_rate: 16000
+    channels: 1
+
+# Industry: Gesundheit (Healthcare)
+industry:
+  name: "gesundheit"
+  display_name: "Gesundheit (Ambulant)"
+
+  # Features
+  features:
+    triage_enabled: true
+    appointment_scheduling: true
+    recall_campaigns: true
+    sms_reminders: true
+
+  # Triage configuration
+  triage:
+    urgency_levels:
+      - name: "akut"
+        description: "Sofortige medizinische Hilfe nötig"
+        action: "transfer_emergency"
+      - name: "dringend"
+        description: "Termin heute erforderlich"
+        action: "schedule_same_day"
+      - name: "normal"
+        description: "Regulärer Termin"
+        action: "schedule_normal"
+      - name: "beratung"
+        description: "Telefonische Beratung ausreichend"
+        action: "provide_info"
+
+  # Business hours
+  hours:
+    monday: "08:00-18:00"
+    tuesday: "08:00-18:00"
+    wednesday: "08:00-13:00"
+    thursday: "08:00-18:00"
+    friday: "08:00-14:00"
+    saturday: null
+    sunday: null
+
+# Integrations
+integrations:
+  # Practice Management System
+  pvs:
+    enabled: false
+    type: "cgm"  # cgm, medatixx, etc.
+    api_url: ""
+    api_key: ""
+
+  # SMS Gateway
+  sms:
+    enabled: false
+    provider: "sipgate"  # sipgate, twilio, etc.
+    api_url: ""
+    api_key: ""
+
+  # Calendar
+  calendar:
+    enabled: true
+    type: "local"  # local, google, microsoft
+    timezone: "Europe/Berlin"

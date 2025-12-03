@@ -1,0 +1,19 @@
+{# Appointment Confirmation Template #}
+{# Variables: patient_name, date, time, doctor_name (optional) #}
+
+{% if doctor_name %}
+Ich habe Sie bei {{ doctor_name }} für {{ date }} um {{ time }} Uhr eingetragen.
+{% else %}
+Ich habe Sie für {{ date }} um {{ time }} Uhr eingetragen.
+{% endif %}
+
+Sie erhalten in Kürze eine Bestätigung per SMS.
+
+Bitte bringen Sie Ihre Versichertenkarte mit.
+{% if is_new_patient %}
+Als Neupatient bringen Sie bitte auch Ihre bisherigen Befunde und eine Medikamentenliste mit.
+{% endif %}
+
+Falls Sie den Termin nicht wahrnehmen können, sagen Sie bitte rechtzeitig ab.
+
+Vielen Dank für Ihren Anruf. Auf Wiederhören!

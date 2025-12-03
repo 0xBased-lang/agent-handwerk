@@ -1,0 +1,320 @@
+"""FastAPI application entry point."""
+
+from __future__ import annotations
+
+import asyncio
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator
+
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
+from slowapi.errors import RateLimitExceeded
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+from itf_shared import setup_logging, get_logger
+from itf_shared.remote import HeartbeatClient
+from itf_shared.models import Industry
+
+from phone_agent.config import get_settings
+from phone_agent.api import (
+    health,
+    calls,
+    appointments,
+    webhooks,
+    sms_webhooks,
+    email_webhooks,
+    triage,
+    recall,
+    outbound,
+    analytics,
+    crm,
+    web_audio,
+    compliance,
+)
+from phone_agent.db import init_db, close_db
+from phone_agent.services.campaign_scheduler import CampaignScheduler
+from phone_agent.api.rate_limits import limiter
+
+
+def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    """Handle rate limit exceeded errors."""
+    return JSONResponse(
+        status_code=429,
+        content={
+            "error": "rate_limit_exceeded",
+            "message": "Too many requests. Please try again later.",
+            "detail": str(exc.detail),
+        },
+    )
+
+
+def http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    """Handle HTTP exceptions with structured response.
+
+    Provides consistent error format across all HTTP errors.
+    """
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": _status_code_to_error_type(exc.status_code),
+            "message": str(exc.detail),
+            "status_code": exc.status_code,
+        },
+    )
+
+
+def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """Handle request validation errors with detailed field information.
+
+    Provides structured error response for Pydantic validation failures.
+    """
+    errors = []
+    for error in exc.errors():
+        field = ".".join(str(loc) for loc in error["loc"] if loc != "body")
+        errors.append({
+            "field": field or "request",
+            "message": error["msg"],
+            "type": error["type"],
+        })
+
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": "validation_error",
+            "message": "Request validation failed",
+            "details": errors,
+        },
+    )
+
+
+def general_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Handle unexpected exceptions.
+
+    Logs the error and returns a generic 500 response without exposing
+    internal details in production.
+    """
+    log = get_logger(__name__)
+    log.error(
+        "Unhandled exception",
+        error=str(exc),
+        error_type=type(exc).__name__,
+        path=request.url.path,
+        method=request.method,
+    )
+
+    settings = get_settings()
+    detail = str(exc) if settings.debug else "An internal error occurred"
+
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "internal_error",
+            "message": detail,
+        },
+    )
+
+
+def _status_code_to_error_type(status_code: int) -> str:
+    """Map HTTP status codes to error type strings."""
+    error_types = {
+        400: "bad_request",
+        401: "unauthorized",
+        403: "forbidden",
+        404: "not_found",
+        405: "method_not_allowed",
+        409: "conflict",
+        410: "gone",
+        422: "validation_error",
+        429: "rate_limit_exceeded",
+        500: "internal_error",
+        502: "bad_gateway",
+        503: "service_unavailable",
+        504: "gateway_timeout",
+    }
+    return error_types.get(status_code, "error")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """Application lifespan manager."""
+    settings = get_settings()
+    log = get_logger(__name__)
+
+    # Setup logging
+    setup_logging(
+        level=settings.log_level,
+        json_output=settings.log_json,
+        device_id=settings.device_id,
+    )
+
+    log.info(
+        "Starting Phone Agent",
+        version="0.1.0",
+        environment=settings.environment,
+        device_id=settings.device_id,
+    )
+
+    # Initialize database
+    log.info("Initializing database")
+    await init_db()
+    log.info("Database initialized successfully")
+
+    # Start heartbeat client
+    heartbeat: HeartbeatClient | None = None
+    if settings.remote_enabled:
+        heartbeat = HeartbeatClient(
+            device_id=settings.device_id,
+            product="phone-agent",
+            industry=Industry.GESUNDHEIT,
+            endpoint=settings.heartbeat_endpoint,
+            interval=settings.heartbeat_interval,
+        )
+        await heartbeat.start()
+
+    # Start campaign scheduler for recall campaigns
+    scheduler: CampaignScheduler | None = None
+    if getattr(settings, "campaign_scheduler_enabled", True):
+        scheduler = CampaignScheduler(
+            poll_interval=getattr(settings, "campaign_poll_interval", 60),
+            max_concurrent_calls=getattr(settings, "max_concurrent_calls", 5),
+        )
+        await scheduler.start()
+        log.info("Campaign scheduler started")
+
+    # Initialize AI models (configurable preloading)
+    preload_models = getattr(settings, "preload_ai_models", False)
+    if preload_models:
+        log.info("Preloading AI models...")
+        try:
+            from phone_agent.dependencies import get_stt, get_llm, get_tts
+            from phone_agent.ai.status import get_model_registry, ModelStatus
+
+            registry = get_model_registry()
+
+            # Preload STT
+            try:
+                registry.update_status("stt", ModelStatus.LOADING)
+                stt = get_stt()
+                stt.load()
+                registry.register_stt(stt)
+                log.info("STT model preloaded")
+            except Exception as e:
+                registry.update_status("stt", ModelStatus.ERROR, str(e))
+                log.error("Failed to preload STT model", error=str(e))
+
+            # Preload LLM
+            try:
+                registry.update_status("llm", ModelStatus.LOADING)
+                llm = get_llm()
+                llm.load()
+                registry.register_llm(llm)
+                log.info("LLM model preloaded")
+            except Exception as e:
+                registry.update_status("llm", ModelStatus.ERROR, str(e))
+                log.error("Failed to preload LLM model", error=str(e))
+
+            # Preload TTS
+            try:
+                registry.update_status("tts", ModelStatus.LOADING)
+                tts = get_tts()
+                tts.load()
+                registry.register_tts(tts)
+                log.info("TTS model preloaded")
+            except Exception as e:
+                registry.update_status("tts", ModelStatus.ERROR, str(e))
+                log.error("Failed to preload TTS model", error=str(e))
+
+            log.info("AI model preloading complete", status=registry.get_overall_status())
+
+        except Exception as e:
+            log.error("AI model preloading failed", error=str(e))
+    else:
+        log.info("AI models will be loaded on first request (lazy loading)")
+
+    yield
+
+    # Shutdown
+    log.info("Shutting down Phone Agent")
+    if scheduler:
+        await scheduler.stop()
+        log.info("Campaign scheduler stopped")
+
+    if heartbeat:
+        await heartbeat.stop()
+
+    # Close database connections
+    await close_db()
+    log.info("Database connections closed")
+
+
+def create_app() -> FastAPI:
+    """Create and configure the FastAPI application."""
+    settings = get_settings()
+
+    app = FastAPI(
+        title="IT-Friends Phone Agent",
+        description="AI-powered telephone system for German SME automation",
+        version="0.1.0",
+        lifespan=lifespan,
+        docs_url="/docs" if settings.debug else None,
+        redoc_url="/redoc" if settings.debug else None,
+    )
+
+    # Rate limiting
+    app.state.limiter = limiter
+
+    # Exception handlers (order matters - most specific first)
+    app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
+    app.add_exception_handler(RequestValidationError, validation_exception_handler)
+    app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+    app.add_exception_handler(Exception, general_exception_handler)
+
+    # CORS middleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"] if settings.debug else [],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # Include routers
+    app.include_router(health.router, tags=["Health"])
+    app.include_router(calls.router, prefix="/api/v1", tags=["Calls"])
+    app.include_router(appointments.router, prefix="/api/v1", tags=["Appointments"])
+    app.include_router(webhooks.router, prefix="/api/v1", tags=["Webhooks"])
+    app.include_router(sms_webhooks.router, prefix="/api/v1/webhooks", tags=["SMS Webhooks"])
+    app.include_router(email_webhooks.router, prefix="/api/v1", tags=["Email Webhooks"])
+    app.include_router(triage.router, prefix="/api/v1", tags=["Triage"])
+    app.include_router(recall.router, prefix="/api/v1", tags=["Recall Campaigns"])
+    app.include_router(outbound.router, prefix="/api/v1", tags=["Outbound Calling"])
+    app.include_router(analytics.router, prefix="/api/v1", tags=["Analytics"])
+    app.include_router(crm.router, prefix="/api/v1", tags=["CRM"])
+    app.include_router(web_audio.router, prefix="/api/v1", tags=["Web Audio"])
+    app.include_router(compliance.router, prefix="/api/v1", tags=["Compliance"])
+
+    return app
+
+
+# Create application instance
+app = create_app()
+
+
+def run() -> None:
+    """Run the application with uvicorn."""
+    import uvicorn
+
+    settings = get_settings()
+    uvicorn.run(
+        "phone_agent.main:app",
+        host=settings.api_host,
+        port=settings.api_port,
+        reload=settings.debug,
+        log_level=settings.log_level.lower(),
+    )
+
+
+if __name__ == "__main__":
+    run()

@@ -1,0 +1,85 @@
+<!--
+    FreeSWITCH External SIP Profile for Phone Agent
+
+    This profile handles incoming calls from SIP trunks (sipgate, etc.)
+    and outbound calls to external numbers.
+
+    Ports:
+    - SIP: 5080 (UDP/TCP)
+    - TLS: 5081
+    - RTP: 10000-20000 (UDP)
+
+    NAT Handling:
+    - Configured for common NAT scenarios
+    - STUN disabled by default (enable if behind complex NAT)
+-->
+<profile name="external">
+    <gateways>
+        <!-- Gateways are loaded from directory/default/gateway_*.xml -->
+        <X-PRE-PROCESS cmd="include" data="directory/default/gateway_*.xml"/>
+    </gateways>
+
+    <aliases>
+        <alias name="external"/>
+    </aliases>
+
+    <domains>
+        <domain name="all" alias="false" parse="true"/>
+    </domains>
+
+    <settings>
+        <!-- SIP Settings -->
+        <param name="context" value="public"/>
+        <param name="dialplan" value="XML"/>
+
+        <!-- Network Binding -->
+        <param name="sip-ip" value="$${local_ip_v4}"/>
+        <param name="sip-port" value="5080"/>
+        <param name="rtp-ip" value="$${local_ip_v4}"/>
+
+        <!-- TLS Settings (optional, enable for secure trunks) -->
+        <param name="tls" value="false"/>
+        <param name="tls-sip-port" value="5081"/>
+
+        <!-- NAT Handling -->
+        <param name="ext-rtp-ip" value="auto-nat"/>
+        <param name="ext-sip-ip" value="auto-nat"/>
+        <param name="rtp-timeout-sec" value="300"/>
+        <param name="rtp-hold-timeout-sec" value="1800"/>
+
+        <!-- Codec Preferences (in order of preference) -->
+        <!-- G.722 for wideband, G.711 for compatibility -->
+        <param name="inbound-codec-prefs" value="G722,PCMU,PCMA"/>
+        <param name="outbound-codec-prefs" value="G722,PCMU,PCMA"/>
+
+        <!-- Authentication -->
+        <param name="challenge-realm" value="auto_from"/>
+        <param name="auth-calls" value="false"/>
+
+        <!-- Media Settings -->
+        <param name="inbound-late-negotiation" value="true"/>
+        <param name="inbound-zrtp-passthru" value="false"/>
+
+        <!-- DTMF Settings -->
+        <param name="dtmf-duration" value="2000"/>
+        <param name="dtmf-type" value="rfc2833"/>
+        <param name="rfc2833-pt" value="101"/>
+
+        <!-- Call Limits -->
+        <param name="max-proceeding" value="1000"/>
+
+        <!-- Registration -->
+        <param name="manage-presence" value="false"/>
+
+        <!-- RTP Port Range -->
+        <param name="rtp-start-port" value="10000"/>
+        <param name="rtp-end-port" value="20000"/>
+
+        <!-- Session Timers -->
+        <param name="session-timeout" value="1800"/>
+        <param name="minimum-session-expires" value="120"/>
+
+        <!-- Logging -->
+        <param name="log-auth-failures" value="true"/>
+    </settings>
+</profile>

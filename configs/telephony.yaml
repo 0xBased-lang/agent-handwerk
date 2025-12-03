@@ -1,0 +1,200 @@
+# Phone Agent Telephony Configuration
+# This file configures all telephony-related settings for the phone-agent
+
+# =============================================================================
+# FreeSWITCH Configuration
+# =============================================================================
+freeswitch:
+  # Event Socket Layer (ESL) connection
+  esl:
+    host: ${FREESWITCH_HOST:-127.0.0.1}
+    port: ${FREESWITCH_ESL_PORT:-8021}
+    password: ${FREESWITCH_ESL_PASSWORD:-ClueCon}
+    reconnect_interval: 5  # seconds
+    max_reconnect_attempts: 10
+
+  # SIP settings
+  sip:
+    external_port: 5080
+    internal_port: 5060
+    tls_port: 5081
+
+  # RTP settings
+  rtp:
+    port_range_start: 10000
+    port_range_end: 20000
+    codec_negotiation: generous  # generous, greedy, scrooge
+
+# =============================================================================
+# Audio Codec Configuration
+# =============================================================================
+codecs:
+  # Primary codec for German telephony (recommended)
+  primary: PCMA  # G.711 A-law (common in Europe)
+
+  # Fallback order
+  preference:
+    - PCMA    # G.711 A-law (8kHz, 64kbps)
+    - PCMU    # G.711 μ-law (8kHz, 64kbps)
+    - G722    # G.722 (16kHz, 64kbps) - higher quality
+
+  # Internal audio format for AI processing
+  internal:
+    sample_rate: 16000  # 16kHz for Whisper/TTS
+    channels: 1         # Mono
+    format: pcm_s16le   # 16-bit signed little-endian PCM
+    chunk_size: 320     # 20ms at 16kHz
+
+  # Transcoding settings
+  transcoding:
+    enabled: true
+    resample_quality: high  # low, medium, high
+    buffer_ms: 100
+
+# =============================================================================
+# RTP Handling
+# =============================================================================
+rtp:
+  # Jitter buffer configuration
+  jitter_buffer:
+    enabled: true
+    min_ms: 40
+    max_ms: 200
+    target_ms: 100
+    adaptive: true
+
+  # Packet loss handling
+  packet_loss:
+    max_consecutive: 5
+    concealment: interpolate  # silence, interpolate, repeat
+
+  # DTMF detection
+  dtmf:
+    mode: rfc2833  # rfc2833, inband, info
+    duration_ms: 100
+
+# =============================================================================
+# SIP Trunk Configuration
+# =============================================================================
+trunks:
+  # Primary: sipgate (German provider)
+  sipgate:
+    enabled: true
+    type: sipgate
+    realm: sipgate.de
+    proxy: sipgate.de
+    username: ${SIPGATE_USERNAME}
+    password: ${SIPGATE_PASSWORD}
+    register: true
+    codecs: [PCMA, PCMU, G722]
+    caller_id: ${SIPGATE_CALLER_ID}
+    max_channels: 10
+
+  # Alternative: Twilio
+  twilio:
+    enabled: ${TWILIO_ENABLED:-false}
+    type: twilio
+    account_sid: ${TWILIO_ACCOUNT_SID}
+    auth_token: ${TWILIO_AUTH_TOKEN}
+    from_number: ${TWILIO_FROM_NUMBER}
+    twiml_app_sid: ${TWILIO_TWIML_APP_SID}
+    webhook_url: ${TWILIO_WEBHOOK_URL}
+    max_channels: 20
+
+# =============================================================================
+# Webhook Configuration
+# =============================================================================
+webhooks:
+  # Twilio webhooks
+  twilio:
+    voice_url: /api/v1/webhooks/twilio/voice
+    status_callback: /api/v1/webhooks/twilio/status
+    media_streams:
+      enabled: true
+      url: /api/v1/webhooks/twilio/media
+      track: inbound_track
+    signature_validation: true
+    auth_token: ${TWILIO_AUTH_TOKEN}
+
+  # sipgate webhooks
+  sipgate:
+    incoming_url: /api/v1/webhooks/sipgate/incoming
+    hangup_url: /api/v1/webhooks/sipgate/hangup
+    answer_url: /api/v1/webhooks/sipgate/answer
+    api_token: ${SIPGATE_API_TOKEN}
+    signature_validation: true
+
+# =============================================================================
+# Call Handling
+# =============================================================================
+calls:
+  # Timeouts
+  timeouts:
+    answer: 30        # seconds to wait for answer
+    ring: 45          # seconds to ring before timeout
+    call_max: 3600    # maximum call duration (1 hour)
+    idle: 30          # seconds of silence before AI prompts
+
+  # Transfer settings
+  transfer:
+    operator_number: ${OPERATOR_NUMBER}
+    emergency_numbers: ["110", "112", "116116", "116117"]
+    transfer_timeout: 20
+    announce_transfer: true  # Play announcement before transfer
+
+  # Recording
+  recording:
+    enabled: ${RECORDING_ENABLED:-true}
+    format: wav
+    sample_rate: 16000
+    stereo: true  # Separate caller and agent channels
+    storage_path: ${RECORDING_PATH:-./recordings}
+    retention_days: 90
+
+# =============================================================================
+# WebSocket Audio (Browser Testing)
+# =============================================================================
+websocket:
+  enabled: true
+  path: /api/v1/audio/ws
+  heartbeat_interval: 30  # seconds
+  audio:
+    sample_rate: 16000
+    channels: 1
+    format: pcm_s16le
+    chunk_ms: 20
+  max_connections: 10
+  auth_required: true
+
+# =============================================================================
+# Quality of Service
+# =============================================================================
+qos:
+  # Audio quality targets
+  audio:
+    target_mos: 4.0     # Mean Opinion Score (1-5)
+    max_latency_ms: 150
+    max_jitter_ms: 30
+    max_packet_loss: 0.01  # 1%
+
+  # Monitoring
+  monitoring:
+    enabled: true
+    rtcp_interval: 5000  # ms
+    report_interval: 60  # seconds
+
+# =============================================================================
+# Development/Testing
+# =============================================================================
+development:
+  # Local testing mode
+  local_mode: ${TELEPHONY_LOCAL_MODE:-false}
+  mock_calls: false
+  log_rtp: false  # Warning: High volume
+
+  # Simulated delay for testing
+  simulated_latency_ms: 0
+
+  # Test endpoints
+  test_extension: "5000"
+  echo_extension: "9196"  # Echo back audio

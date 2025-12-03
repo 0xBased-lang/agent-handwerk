@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  phone-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: itf-phone-agent
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      # Configuration
+      - ./configs:/app/configs:ro
+      - ./prompts:/app/prompts:ro
+      # AI Models (downloaded separately)
+      - ./models:/app/models:ro
+      # Database persistence
+      - phone_agent_data:/app/data
+      # Audio devices
+      - /dev/snd:/dev/snd
+    environment:
+      - ITF_ENV=${ITF_ENV:-production}
+      - ITF_DEVICE_ID=${ITF_DEVICE_ID:-}
+      - ITF_LOG_LEVEL=${ITF_LOG_LEVEL:-INFO}
+      - ITF_LOG_JSON=true
+    devices:
+      # Audio access
+      - /dev/snd:/dev/snd
+    group_add:
+      - audio
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 2G
+
+  # Optional: Prometheus metrics exporter
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: itf-node-exporter
+    restart: unless-stopped
+    network_mode: host
+    pid: host
+    volumes:
+      - /:/host:ro,rslave
+    command:
+      - '--path.rootfs=/host'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    profiles:
+      - monitoring
+
+volumes:
+  phone_agent_data:
+    name: itf_phone_agent_data

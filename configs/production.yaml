@@ -1,0 +1,266 @@
+# IT-Friends Phone Agent - Production Configuration
+# ================================================
+# Complete production-ready configuration for German medical practices
+# Override settings with environment variables: ITF_*
+#
+# IMPORTANT: Never commit secrets! Use environment variables for:
+# - API keys, tokens, passwords
+# - Database credentials
+# - Webhook secrets
+
+# Device identification
+device_name: "phone-agent-prod"
+
+# Environment
+environment: production
+debug: false
+
+# Logging - JSON format for log aggregation (Loki, ELK, etc.)
+log_level: INFO
+log_json: true
+
+# API Server
+api_host: "0.0.0.0"
+api_port: 8080
+
+# AI Model preloading (set true for faster first-call response)
+preload_ai_models: false
+
+# Remote Management
+remote_enabled: true
+heartbeat_interval: 60
+heartbeat_endpoint: null  # Set ITF_HEARTBEAT_ENDPOINT in environment
+
+# =============================================================================
+# DATABASE
+# =============================================================================
+database:
+  # SQLite for single-device deployment (default)
+  url: "sqlite+aiosqlite:///data/phone_agent.db"
+  echo: false
+
+  # PostgreSQL for multi-device or high-volume deployment:
+  # url: "postgresql+asyncpg://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:5432/${DB_NAME}"
+
+# =============================================================================
+# AI MODELS (Raspberry Pi 5 optimized)
+# =============================================================================
+ai:
+  # Speech-to-Text (faster-whisper)
+  stt:
+    model: "distil-whisper-large-v3-german"
+    model_path: "models/whisper"
+    device: "cpu"  # "cuda" for NVIDIA, "npu" for Coral/Hailo
+    compute_type: "int8"  # int8 for Pi, float16 for GPU
+    language: "de"
+    beam_size: 5
+    vad_filter: true
+
+  # Language Model (llama-cpp)
+  llm:
+    model: "llama-3.2-1b-instruct-q4_k_m.gguf"
+    model_path: "models/llm"
+    n_ctx: 2048
+    n_threads: 4  # Raspberry Pi 5 has 4 cores
+    n_gpu_layers: 0  # Set >0 if using accelerator
+    temperature: 0.7
+    max_tokens: 256
+
+  # Text-to-Speech (Piper)
+  tts:
+    model: "de_DE-thorsten-medium"
+    model_path: "models/tts"
+    speaker_id: 0
+    sample_rate: 22050
+
+# =============================================================================
+# TELEPHONY - Choose ONE backend
+# =============================================================================
+telephony:
+  enabled: true
+
+  # --- OPTION A: FreeSWITCH (recommended for SIP trunks) ---
+  freeswitch:
+    enabled: false
+    host: "127.0.0.1"
+    port: 8021
+    password: ""  # Set ITF_TELEPHONY__FREESWITCH__PASSWORD
+    reconnect: true
+    reconnect_delay: 5.0
+    max_reconnect_attempts: 10
+
+  # --- OPTION B: Twilio (cloud telephony) ---
+  twilio:
+    enabled: false
+    account_sid: ""  # Set ITF_TELEPHONY__TWILIO__ACCOUNT_SID
+    auth_token: ""   # Set ITF_TELEPHONY__TWILIO__AUTH_TOKEN
+    from_number: ""  # +49XXXXXXXXX format
+    twiml_app_sid: ""
+    webhook_url: ""  # https://your-domain.com/api/v1/webhooks/twilio
+    messaging_service_sid: ""  # Optional for SMS
+
+  # --- OPTION C: sipgate (German VoIP provider) ---
+  sipgate:
+    enabled: false
+    username: ""
+    password: ""
+    api_token: ""   # Set ITF_TELEPHONY__SIPGATE__API_TOKEN
+    caller_id: ""
+
+  # Direct SIP (for custom PBX integration)
+  sip:
+    server: ""
+    username: ""
+    password: ""
+    port: 5060
+
+  # Audio settings
+  audio:
+    input_device: "default"
+    output_device: "default"
+    sample_rate: 16000
+    channels: 1
+
+  # Webhook security
+  webhooks:
+    validate_signatures: true
+    validate_ip: false
+    timestamp_tolerance_seconds: 300
+
+# =============================================================================
+# INDUSTRY: Gesundheit (Healthcare)
+# =============================================================================
+industry:
+  name: "gesundheit"
+  display_name: "Gesundheit (Ambulant)"
+
+  features:
+    triage_enabled: true
+    appointment_scheduling: true
+    recall_campaigns: true
+    sms_reminders: true
+    email_confirmations: true
+
+  # Triage urgency levels (German medical practice standard)
+  triage:
+    urgency_levels:
+      - name: "akut"
+        description: "Sofortige medizinische Hilfe nötig"
+        action: "transfer_emergency"
+      - name: "dringend"
+        description: "Termin heute erforderlich"
+        action: "schedule_same_day"
+      - name: "normal"
+        description: "Regulärer Termin"
+        action: "schedule_normal"
+      - name: "beratung"
+        description: "Telefonische Beratung ausreichend"
+        action: "provide_info"
+
+  # Business hours (German format)
+  hours:
+    monday: "08:00-18:00"
+    tuesday: "08:00-18:00"
+    wednesday: "08:00-13:00"
+    thursday: "08:00-18:00"
+    friday: "08:00-14:00"
+    saturday: null
+    sunday: null
+
+# =============================================================================
+# INTEGRATIONS
+# =============================================================================
+integrations:
+  # ---------------------------------------------------------------------------
+  # Practice Management System (PVS)
+  # ---------------------------------------------------------------------------
+  pvs:
+    enabled: false
+    type: "cgm"  # cgm, medatixx, turbomed, tomedo
+    api_url: ""  # Set ITF_INTEGRATIONS__PVS__API_URL
+    api_key: ""  # Set ITF_INTEGRATIONS__PVS__API_KEY
+
+  # ---------------------------------------------------------------------------
+  # SMS Gateway (for appointment reminders)
+  # ---------------------------------------------------------------------------
+  sms:
+    enabled: false
+    provider: "twilio"  # twilio, sipgate, mock
+    api_url: ""
+    api_key: ""
+
+  # ---------------------------------------------------------------------------
+  # Email Gateway (for confirmations & notifications)
+  # ---------------------------------------------------------------------------
+  email:
+    enabled: false
+    provider: "sendgrid"  # smtp, sendgrid, mock
+    from_email: ""        # noreply@praxis-name.de
+    from_name: ""         # Praxis Dr. Name
+    reply_to: ""          # info@praxis-name.de
+
+    # SMTP Settings (if provider = "smtp")
+    smtp:
+      host: ""            # smtp.gmail.com, smtp.office365.com, etc.
+      port: 587
+      username: ""
+      password: ""        # Set ITF_INTEGRATIONS__EMAIL__SMTP__PASSWORD
+      use_tls: true
+      use_ssl: false
+
+    # SendGrid Settings (if provider = "sendgrid")
+    sendgrid:
+      api_key: ""         # Set ITF_INTEGRATIONS__EMAIL__SENDGRID__API_KEY
+      webhook_url: ""     # https://your-domain.com/api/v1/webhooks/email/sendgrid/events
+
+  # ---------------------------------------------------------------------------
+  # Calendar Integration
+  # ---------------------------------------------------------------------------
+  calendar:
+    enabled: true
+    type: "google"  # local, google, mock
+    timezone: "Europe/Berlin"
+
+    # Google Calendar settings
+    google:
+      credentials_file: ""  # Path to service account JSON
+      credentials_json: ""  # Or JSON string from environment
+      calendar_id: "primary"
+
+      # Business hours for slot generation
+      business_hours_start: "08:00"
+      business_hours_end: "18:00"
+      lunch_start: "12:00"
+      lunch_end: "13:00"
+      working_days: [0, 1, 2, 3, 4]  # Monday-Friday
+
+      # Scheduling limits
+      default_slot_duration: 15
+      max_advance_days: 30
+
+      # API settings
+      max_retries: 3
+      retry_base_delay: 1.0
+      cache_ttl_seconds: 30
+
+# =============================================================================
+# CAMPAIGN SCHEDULER (for recall campaigns)
+# =============================================================================
+campaign_scheduler_enabled: true
+campaign_poll_interval: 60  # seconds
+max_concurrent_calls: 5
+
+# =============================================================================
+# COMPLIANCE (GDPR/DSGVO)
+# =============================================================================
+compliance:
+  # Data retention periods (days)
+  retention:
+    call_recordings: 90
+    appointment_data: 365
+    audit_logs: 730  # 2 years
+
+  # Consent requirements
+  consent:
+    require_recording_consent: true
+    require_data_processing_consent: true

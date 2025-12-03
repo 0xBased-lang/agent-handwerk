@@ -1,0 +1,98 @@
+<!--
+    FreeSWITCH Gateway Configuration for sipgate
+
+    sipgate is a German VoIP provider commonly used for business telephony.
+    This configuration enables inbound and outbound calls via sipgate trunking.
+
+    Configuration Steps:
+    1. Get SIP credentials from sipgate.de team portal
+    2. Replace SIPGATE_USERNAME, SIPGATE_PASSWORD with actual credentials
+    3. Update realm if using sipgate basic vs team
+
+    Environment Variables:
+    - SIPGATE_USERNAME: SIP username from sipgate
+    - SIPGATE_PASSWORD: SIP password from sipgate
+    - SIPGATE_REALM: SIP realm (default: sipgate.de)
+
+    Codecs: G.711 (PCMU/PCMA), G.722 supported
+    DTMF: RFC2833 (default)
+-->
+<include>
+    <!--
+        Primary sipgate Gateway
+        Used for production calls
+    -->
+    <gateway name="sipgate">
+        <!-- Authentication -->
+        <param name="username" value="${SIPGATE_USERNAME}"/>
+        <param name="password" value="${SIPGATE_PASSWORD}"/>
+        <param name="realm" value="${SIPGATE_REALM:-sipgate.de}"/>
+        <param name="from-domain" value="sipgate.de"/>
+
+        <!-- Proxy Settings -->
+        <param name="proxy" value="sipgate.de"/>
+        <param name="register-proxy" value="sipgate.de"/>
+        <param name="outbound-proxy" value="sipgate.de"/>
+
+        <!-- Registration -->
+        <param name="register" value="true"/>
+        <param name="register-transport" value="udp"/>
+        <param name="expire-seconds" value="3600"/>
+        <param name="retry-seconds" value="30"/>
+
+        <!-- Caller ID -->
+        <param name="caller-id-in-from" value="false"/>
+        <param name="contact-params" value=""/>
+
+        <!-- Codec Preferences -->
+        <param name="codec-prefs" value="PCMA,PCMU,G722"/>
+
+        <!-- DTMF Mode -->
+        <param name="dtmf-type" value="rfc2833"/>
+
+        <!-- Ping to keep connection alive -->
+        <param name="ping" value="25"/>
+    </gateway>
+
+    <!--
+        Backup Gateway (Optional)
+        For failover scenarios
+    -->
+    <gateway name="sipgate_backup">
+        <param name="username" value="${SIPGATE_USERNAME}"/>
+        <param name="password" value="${SIPGATE_PASSWORD}"/>
+        <param name="realm" value="sipgate.de"/>
+        <param name="proxy" value="sipconnect.sipgate.de"/>
+        <param name="register" value="false"/>
+        <param name="codec-prefs" value="PCMA,PCMU"/>
+        <param name="dtmf-type" value="rfc2833"/>
+    </gateway>
+
+    <!--
+        Development Gateway (Local Testing)
+        Connects to local Asterisk or test PBX
+    -->
+    <gateway name="local_test">
+        <param name="username" value="phone_agent"/>
+        <param name="password" value="test_password"/>
+        <param name="realm" value="localhost"/>
+        <param name="proxy" value="127.0.0.1:5060"/>
+        <param name="register" value="false"/>
+        <param name="codec-prefs" value="PCMU,PCMA"/>
+    </gateway>
+
+    <!--
+        Twilio Gateway (Alternative Provider)
+        For US numbers or Twilio integration
+    -->
+    <gateway name="twilio">
+        <param name="username" value="${TWILIO_ACCOUNT_SID}"/>
+        <param name="password" value="${TWILIO_AUTH_TOKEN}"/>
+        <param name="realm" value="${TWILIO_REALM:-sip.twilio.com}"/>
+        <param name="proxy" value="sip.twilio.com"/>
+        <param name="register" value="false"/>
+        <param name="caller-id-in-from" value="true"/>
+        <param name="codec-prefs" value="PCMU,PCMA"/>
+        <param name="dtmf-type" value="rfc2833"/>
+    </gateway>
+</include>

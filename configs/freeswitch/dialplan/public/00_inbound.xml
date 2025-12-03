@@ -1,0 +1,117 @@
+<!--
+    FreeSWITCH Dialplan for Phone Agent
+
+    This dialplan handles incoming calls from the public context (SIP trunks)
+    and routes them to the phone-agent application via ESL.
+
+    Call Flow:
+    1. Call arrives on external profile (port 5080)
+    2. Matched by destination_number pattern
+    3. Answered and parked for ESL control
+    4. phone-agent takes over via ESL socket
+-->
+<include>
+    <!--
+        Main Inbound Route for Phone Agent
+        Matches any DID number and routes to phone-agent ESL
+    -->
+    <extension name="phone_agent_inbound">
+        <condition field="destination_number" expression="^(\+?49\d{6,14}|\d{6,14})$">
+            <!-- Log call arrival -->
+            <action application="log" data="INFO [phone-agent] Incoming call from ${caller_id_number} to ${destination_number}"/>
+
+            <!-- Set call variables for tracking -->
+            <action application="set" data="phone_agent_call=true"/>
+            <action application="set" data="call_direction=inbound"/>
+            <action application="set" data="call_start_time=${strftime(%Y-%m-%d %H:%M:%S)}"/>
+            <action application="set" data="call_uuid=${uuid}"/>
+
+            <!-- Export variables to B-leg if transferred -->
+            <action application="export" data="phone_agent_call"/>
+            <action application="export" data="call_direction"/>
+
+            <!-- Answer the call -->
+            <action application="answer"/>
+
+            <!-- Play brief comfort noise while ESL connects (optional) -->
+            <action application="playback" data="silence_stream://500"/>
+
+            <!-- Park the call - ESL will take control -->
+            <action application="park"/>
+        </condition>
+    </extension>
+
+    <!--
+        Test Extension for Development
+        Dial 5000 to test phone-agent connection
+    -->
+    <extension name="phone_agent_test">
+        <condition field="destination_number" expression="^5000$">
+            <action application="log" data="INFO [phone-agent] Test call initiated"/>
+            <action application="set" data="phone_agent_call=true"/>
+            <action application="set" data="call_direction=test"/>
+            <action application="answer"/>
+            <action application="park"/>
+        </condition>
+    </extension>
+
+    <!--
+        Emergency Transfer Route
+        When phone-agent transfers to emergency number
+    -->
+    <extension name="emergency_transfer">
+        <condition field="destination_number" expression="^(110|112|116\d{3})$">
+            <action application="log" data="CRIT [phone-agent] Emergency transfer to ${destination_number}"/>
+            <action application="set" data="effective_caller_id_number=${caller_id_number}"/>
+            <action application="set" data="effective_caller_id_name=${caller_id_name}"/>
+            <!-- Bridge to emergency via gateway -->
+            <action application="bridge" data="sofia/gateway/sipgate/${destination_number}"/>
+        </condition>
+    </extension>
+
+    <!--
+        Operator Transfer Route
+        Transfer to human operator when AI escalates
+    -->
+    <extension name="operator_transfer">
+        <condition field="destination_number" expression="^(operator|\*0)$">
+            <action application="log" data="INFO [phone-agent] Transfer to operator requested"/>
+            <!-- Ring operators with failover -->
+            <action application="set" data="call_timeout=30"/>
+            <action application="set" data="continue_on_fail=true"/>
+            <!-- Try internal operator first, then external -->
+            <action application="bridge" data="user/operator@${domain_name}|sofia/gateway/sipgate/${operator_external_number}"/>
+            <!-- If no answer, take voicemail -->
+            <action application="voicemail" data="default ${domain_name} operator"/>
+        </condition>
+    </extension>
+
+    <!--
+        Outbound Call Route
+        For recall campaigns and outbound calls
+    -->
+    <extension name="outbound_calls">
+        <condition field="context" expression="^outbound$"/>
+        <condition field="destination_number" expression="^(\+?49\d{6,14}|\d{6,14})$">
+            <action application="log" data="INFO [phone-agent] Outbound call to ${destination_number}"/>
+            <action application="set" data="phone_agent_call=true"/>
+            <action application="set" data="call_direction=outbound"/>
+            <action application="set" data="call_start_time=${strftime(%Y-%m-%d %H:%M:%S)}"/>
+            <!-- Set caller ID from config -->
+            <action application="set" data="effective_caller_id_number=${outbound_caller_id}"/>
+            <action application="set" data="effective_caller_id_name=${outbound_caller_name}"/>
+            <!-- Bridge via gateway -->
+            <action application="bridge" data="sofia/gateway/sipgate/${destination_number}"/>
+        </condition>
+    </extension>
+
+    <!--
+        Fallback: Unroutable Numbers
+    -->
+    <extension name="unroutable">
+        <condition field="destination_number" expression="^.*$">
+            <action application="log" data="WARNING [phone-agent] Unroutable call to ${destination_number}"/>
+            <action application="respond" data="404"/>
+        </condition>
+    </extension>
+</include>
