@@ -302,7 +302,22 @@ class CampaignMetricsRepository(BaseRepository[CampaignMetricsModel]):
             .where(self._model.campaign_id == campaign_id)
         )
         result = await self._session.execute(stmt)
-        row = result.one()
+        row = result.one_or_none()
+
+        # Handle case where no data exists for this campaign
+        if row is None:
+            return {
+                "campaign_id": str(campaign_id),
+                "total_targeted": 0,
+                "total_attempted": 0,
+                "total_reached": 0,
+                "total_converted": 0,
+                "total_calls": 0,
+                "total_appointments": 0,
+                "total_talk_time": 0,
+                "contact_rate": 0.0,
+                "conversion_rate": 0.0,
+            }
 
         targeted = row.total_targeted or 0
         reached = row.total_reached or 0

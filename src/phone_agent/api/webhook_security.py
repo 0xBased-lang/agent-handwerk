@@ -480,11 +480,10 @@ class WebhookSecurityManager:
             log.warning("Invalid Twilio signature", path=str(request.url.path))
             raise WebhookSecurityError("Invalid Twilio signature")
 
-        # Validate IP if enabled
+        # Validate IP if enabled (use local validator to avoid race conditions)
         if self.config.validate_ip:
             client_ip = self._get_client_ip(request)
-            self._ip.allowed_ips = IPValidator.TWILIO_IPS
-            if not self._ip.validate(client_ip):
+            if not _is_ip_in_network(client_ip, IPValidator.TWILIO_IPS):
                 log.warning("Invalid Twilio IP", ip=client_ip)
                 raise WebhookSecurityError("Invalid source IP")
 
@@ -513,11 +512,10 @@ class WebhookSecurityManager:
             if not self._timestamp.validate(timestamp):
                 raise WebhookSecurityError("Request timestamp expired")
 
-        # Validate IP if enabled
+        # Validate IP if enabled (use local validator to avoid race conditions)
         if self.config.validate_ip:
             client_ip = self._get_client_ip(request)
-            self._ip.allowed_ips = IPValidator.SIPGATE_IPS
-            if not self._ip.validate(client_ip):
+            if not _is_ip_in_network(client_ip, IPValidator.SIPGATE_IPS):
                 log.warning("Invalid sipgate IP", ip=client_ip)
                 raise WebhookSecurityError("Invalid source IP")
 

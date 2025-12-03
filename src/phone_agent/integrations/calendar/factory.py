@@ -204,11 +204,15 @@ def _create_mock_adapter() -> CalendarIntegration:
             ]
 
         async def book_slot(self, request: BookingRequest) -> BookingResult:
-            # Create mock patient
+            # Create mock patient - safely parse name
+            name_parts = (request.patient_name or "").split()
+            first_name = name_parts[0] if name_parts else "Patient"
+            last_name = name_parts[-1] if len(name_parts) > 1 else ""
+
             patient = Patient(
                 id=request.patient_id,
-                first_name=request.patient_name.split()[0] if request.patient_name else "Patient",
-                last_name=request.patient_name.split()[-1] if len(request.patient_name.split()) > 1 else "",
+                first_name=first_name,
+                last_name=last_name,
                 date_of_birth=date(1980, 1, 1),  # Placeholder
                 phone=request.patient_phone,
             )

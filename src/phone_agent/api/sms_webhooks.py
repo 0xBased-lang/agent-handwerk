@@ -189,17 +189,17 @@ async def handle_twilio_sms_status(request: Request) -> SMSWebhookResponse:
             )
 
     except Exception as e:
-        log.error(
+        log.exception(
             "Failed to update SMS status",
             provider_message_id=provider_message_id,
-            error=str(e),
         )
+        # Don't leak internal exception details to caller
         return SMSWebhookResponse(
             success=False,
             message_id=provider_message_id,
             status=status,
             action="error",
-            message=str(e),
+            message="Internal error processing SMS status",
         )
 
 
@@ -231,7 +231,7 @@ async def handle_twilio_inbound_sms(request: Request) -> Response:
         message_sid=message_sid,
         from_number=from_number,
         to_number=to_number,
-        body_preview=body[:50] if body else "",
+        body_length=len(body) if body else 0,  # Don't log PII content
         num_media=num_media,
     )
 

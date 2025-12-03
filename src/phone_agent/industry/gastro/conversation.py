@@ -599,15 +599,22 @@ class GastroConversationManager:
             del self._contexts[call_id]
 
 
-# Singleton instance
+# Singleton instance with thread-safe initialization
 _conversation_manager: GastroConversationManager | None = None
+_conversation_manager_lock = __import__("threading").Lock()
 
 
 def get_conversation_manager(
     restaurant_name: str = "Restaurant",
 ) -> GastroConversationManager:
-    """Get or create conversation manager singleton."""
+    """Get or create conversation manager singleton.
+
+    Thread-safe via double-checked locking pattern.
+    """
     global _conversation_manager
     if _conversation_manager is None:
-        _conversation_manager = GastroConversationManager(restaurant_name)
+        with _conversation_manager_lock:
+            # Double-check after acquiring lock
+            if _conversation_manager is None:
+                _conversation_manager = GastroConversationManager(restaurant_name)
     return _conversation_manager

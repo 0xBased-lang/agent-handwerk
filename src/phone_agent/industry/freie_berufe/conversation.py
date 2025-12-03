@@ -597,16 +597,23 @@ class FreieBerufeConversationManager:
             del self._contexts[call_id]
 
 
-# Singleton instance
+# Singleton instance with thread-safe initialization
 _conversation_manager: FreieBerufeConversationManager | None = None
+_conversation_manager_lock = __import__("threading").Lock()
 
 
 def get_conversation_manager(
     practice_name: str = "Kanzlei",
     specialty: str = "Rechts- und Steuerberatung",
 ) -> FreieBerufeConversationManager:
-    """Get or create conversation manager singleton."""
+    """Get or create conversation manager singleton.
+
+    Thread-safe via double-checked locking pattern.
+    """
     global _conversation_manager
     if _conversation_manager is None:
-        _conversation_manager = FreieBerufeConversationManager(practice_name, specialty)
+        with _conversation_manager_lock:
+            # Double-check after acquiring lock
+            if _conversation_manager is None:
+                _conversation_manager = FreieBerufeConversationManager(practice_name, specialty)
     return _conversation_manager

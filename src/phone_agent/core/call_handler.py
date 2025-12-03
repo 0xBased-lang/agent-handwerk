@@ -104,6 +104,7 @@ class CallHandler:
 
         self._current_call: CallContext | None = None
         self._call_history: list[CallContext] = []
+        self._call_lock = asyncio.Lock()  # Protect call state changes
 
         # Event callbacks
         self._on_state_change: Callable[[CallState, CallState, CallContext], None] | None = None
@@ -162,16 +163,17 @@ class CallHandler:
         Returns:
             Call context for the new call
         """
-        if self._current_call and self._current_call.state not in (CallState.IDLE, CallState.ENDED):
-            log.warning("Already in call, rejecting", caller_id=caller_id)
-            raise RuntimeError("Already handling a call")
+        async with self._call_lock:
+            if self._current_call and self._current_call.state not in (CallState.IDLE, CallState.ENDED):
+                log.warning("Already in call, rejecting", caller_id=caller_id)
+                raise RuntimeError("Already handling a call")
 
-        # Create call context
-        self._current_call = CallContext(
-            caller_id=caller_id,
-            callee_id=callee_id,
-            metadata=metadata or {},
-        )
+            # Create call context
+            self._current_call = CallContext(
+                caller_id=caller_id,
+                callee_id=callee_id,
+                metadata=metadata or {},
+            )
 
         # Transition to RINGING
         await self._transition(CallEvent.INCOMING_CALL)

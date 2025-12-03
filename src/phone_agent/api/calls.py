@@ -5,7 +5,7 @@ Replaces in-memory storage with SQLAlchemy-backed repository.
 """
 from __future__ import annotations
 
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from enum import Enum
 from typing import Any, Annotated
 from uuid import UUID, uuid4
@@ -425,9 +425,13 @@ async def end_call(
     if call.status not in ["ringing", "in_progress", "active", "on_hold"]:
         raise HTTPException(status_code=400, detail="Call is not active")
 
-    # Calculate duration
-    ended_at = datetime.utcnow()
-    duration = int((ended_at - call.started_at).total_seconds())
+    # Calculate duration with timezone-aware datetime
+    ended_at = datetime.now(timezone.utc)
+    # Ensure started_at is timezone-aware for comparison
+    started_at = call.started_at
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=timezone.utc)
+    duration = int((ended_at - started_at).total_seconds())
 
     updated = await repo.update(call_id, {
         "status": CallStatus.COMPLETED.value,

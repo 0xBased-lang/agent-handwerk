@@ -192,7 +192,8 @@ class ComplianceService:
                 legal_text=legal_text,
                 notes=notes,
             )
-            consent = existing
+            # Persist the updated consent to database
+            consent = await self._consent_repo.update(existing)
             action = "consent_updated"
         else:
             # Create new consent

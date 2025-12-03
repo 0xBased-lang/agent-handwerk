@@ -157,8 +157,11 @@ class SendGridEmailGateway(EmailGateway):
                 )
 
             else:
-                # Error response
-                error_data = response.json() if response.content else {}
+                # Error response - safely parse JSON
+                try:
+                    error_data = response.json() if response.content else {}
+                except (ValueError, TypeError):
+                    error_data = {}
                 errors_list = error_data.get("errors", [])
                 error_message = "; ".join(
                     e.get("message", "Unknown error") for e in errors_list

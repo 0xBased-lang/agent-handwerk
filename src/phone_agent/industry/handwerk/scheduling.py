@@ -110,8 +110,10 @@ class Customer:
         addr = f"{self.street} {self.house_number}"
         if self.apartment:
             addr += f", {self.apartment}"
-        if self.floor:
-            addr += f", {self.floor}. OG"
+        if self.floor is not None:
+            # Floor 0 is ground floor (EG in German), others are upper floors (OG)
+            floor_str = "EG" if self.floor == 0 else f"{self.floor}. OG"
+            addr += f", {floor_str}"
         addr += f"\n{self.zip_code} {self.city}"
         return addr
 

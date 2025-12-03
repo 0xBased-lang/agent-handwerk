@@ -326,11 +326,18 @@ class ResourceExhaustedError(ResourceError):
     error_code = "RESOURCE_EXHAUSTED"
 
 
-class TimeoutError(ResourceError):
-    """Operation timed out."""
+class ResourceTimeoutError(ResourceError):
+    """Operation timed out.
+
+    Note: Named ResourceTimeoutError to avoid shadowing Python's built-in TimeoutError.
+    """
 
     status_code = 504
     error_code = "TIMEOUT"
+
+
+# Alias for backwards compatibility (deprecated)
+TimeoutError = ResourceTimeoutError  # noqa: A001 - intentional shadow for compat
 
 
 # =============================================================================
