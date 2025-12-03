@@ -546,8 +546,8 @@ async def web_audio_websocket(websocket: WebSocket):
                                     "data": audio_b64,
                                 })
 
-                except Exception as e:
-                    log.error(f"Audio processing error: {e}")
+                except Exception:
+                    log.exception("Audio processing error")
 
     except WebSocketDisconnect:
         log.info(f"Web audio session disconnected: {session_id}")

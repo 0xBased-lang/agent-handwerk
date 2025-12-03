@@ -357,7 +357,7 @@ async def create_call(
         status=CallStatus.INCOMING.value,
         caller_id=call_in.caller_id,
         callee_id=call_in.callee_id,
-        started_at=datetime.utcnow(),
+        started_at=datetime.now(timezone.utc),
         industry=call_in.industry,
     )
     call.metadata = call_in.metadata

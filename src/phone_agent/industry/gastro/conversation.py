@@ -599,22 +599,24 @@ class GastroConversationManager:
             del self._contexts[call_id]
 
 
-# Singleton instance with thread-safe initialization
-_conversation_manager: GastroConversationManager | None = None
+# Manager instances keyed by restaurant name (thread-safe)
+_conversation_managers: dict[str, GastroConversationManager] = {}
 _conversation_manager_lock = __import__("threading").Lock()
 
 
 def get_conversation_manager(
     restaurant_name: str = "Restaurant",
 ) -> GastroConversationManager:
-    """Get or create conversation manager singleton.
+    """Get or create conversation manager for a specific restaurant.
 
     Thread-safe via double-checked locking pattern.
+    Each restaurant gets its own manager instance.
     """
-    global _conversation_manager
-    if _conversation_manager is None:
+    if restaurant_name not in _conversation_managers:
         with _conversation_manager_lock:
             # Double-check after acquiring lock
-            if _conversation_manager is None:
-                _conversation_manager = GastroConversationManager(restaurant_name)
-    return _conversation_manager
+            if restaurant_name not in _conversation_managers:
+                _conversation_managers[restaurant_name] = GastroConversationManager(
+                    restaurant_name
+                )
+    return _conversation_managers[restaurant_name]

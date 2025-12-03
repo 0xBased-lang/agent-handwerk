@@ -175,33 +175,36 @@ class CallHandler:
                 metadata=metadata or {},
             )
 
-        # Transition to RINGING
-        await self._transition(CallEvent.INCOMING_CALL)
+            # Transition to RINGING (under lock to prevent races)
+            await self._transition(CallEvent.INCOMING_CALL)
 
-        log.info(
-            "Incoming call",
-            call_id=str(self._current_call.call_id),
-            caller_id=caller_id,
-        )
+            log.info(
+                "Incoming call",
+                call_id=str(self._current_call.call_id),
+                caller_id=caller_id,
+            )
 
-        return self._current_call
+            return self._current_call
 
     async def answer_call(self) -> None:
         """Answer the current ringing call."""
-        if not self._current_call or self._current_call.state != CallState.RINGING:
-            raise RuntimeError("No ringing call to answer")
+        # Perform state checks and mutations under lock
+        async with self._call_lock:
+            if not self._current_call or self._current_call.state != CallState.RINGING:
+                raise RuntimeError("No ringing call to answer")
 
-        self._current_call.started_at = datetime.now()
+            self._current_call.started_at = datetime.now()
 
-        # Start conversation
-        self._current_call.conversation = self.conversation_engine.start_conversation()
+            # Start conversation
+            self._current_call.conversation = self.conversation_engine.start_conversation()
 
-        # Transition to GREETING
-        await self._transition(CallEvent.CALL_ANSWERED)
+            # Transition to GREETING
+            await self._transition(CallEvent.CALL_ANSWERED)
 
-        if self._on_call_start:
-            self._on_call_start(self._current_call)
+            if self._on_call_start:
+                self._on_call_start(self._current_call)
 
+        # Long-running I/O operations outside lock
         # Start audio pipeline
         self.audio_pipeline.start()
 

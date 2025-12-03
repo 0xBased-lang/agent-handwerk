@@ -626,7 +626,8 @@ class TestIntegration:
         next_tuesday = today + timedelta(days=days_until_tuesday)
         date_str = next_tuesday.strftime("%Y-%m-%d")
 
-        slots = scheduling.find_available_slots(date_str, service_area="legal")
+        # Verify slots are available (result used implicitly by scheduler)
+        _ = scheduling.find_available_slots(date_str, service_area="legal")
 
         # Create contact and inquiry
         contact = ContactContext(

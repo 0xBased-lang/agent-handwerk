@@ -21,11 +21,19 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 # Configuration
-FREESWITCH_USER="freeswitch"
-FREESWITCH_GROUP="freeswitch"
-ESL_PASSWORD="ITFriends2024"
 PHONE_AGENT_HOST="127.0.0.1"
 PHONE_AGENT_PORT="9090"
+
+# Security: ESL password must be provided via environment variable
+if [ -z "$ESL_PASSWORD" ]; then
+    echo "ERROR: ESL_PASSWORD environment variable is not set."
+    echo "Please set it before running this script:"
+    echo "  export ESL_PASSWORD='your-secure-password'"
+    echo ""
+    echo "Generate a secure password with:"
+    echo "  openssl rand -base64 32"
+    exit 1
+fi
 
 echo "[1/6] Installing dependencies..."
 apt-get update
@@ -158,7 +166,7 @@ echo ""
 echo "Configuration:"
 echo "  ESL Host: 127.0.0.1"
 echo "  ESL Port: 8021"
-echo "  ESL Password: ${ESL_PASSWORD}"
+echo "  ESL Password: ********** (from ESL_PASSWORD env var)"
 echo ""
 echo "Phone Agent Audio Bridge:"
 echo "  Host: ${PHONE_AGENT_HOST}"
@@ -173,5 +181,5 @@ echo "    backend: freeswitch"
 echo "    freeswitch:"
 echo "      host: 127.0.0.1"
 echo "      port: 8021"
-echo "      password: ${ESL_PASSWORD}"
+echo "      password: \${ESL_PASSWORD}  # Set via environment variable"
 echo ""

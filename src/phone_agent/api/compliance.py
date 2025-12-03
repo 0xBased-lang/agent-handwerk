@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import csv
 import io
-from datetime import datetime, date, time, timedelta
+from datetime import datetime, date, time, timedelta, timezone
 from enum import Enum
 from typing import Any, Annotated
 from uuid import UUID, uuid4
@@ -373,8 +373,8 @@ async def record_consent(
 
     except Exception as e:
         await session.rollback()
-        log.error("Failed to record consent", error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        log.exception("Failed to record consent")
+        raise HTTPException(status_code=500, detail="Failed to record consent") from e
 
 
 @router.get(
@@ -492,11 +492,11 @@ async def revoke_consent(
         }
 
     except ConsentNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
         await session.rollback()
-        log.error("Failed to revoke consent", error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        log.exception("Failed to revoke consent")
+        raise HTTPException(status_code=500, detail="Failed to revoke consent") from e
 
 
 # ============================================================================
@@ -543,11 +543,11 @@ async def query_audit_log(
     Returns:
         Paginated audit log entries
     """
-    # Default date range if not specified
+    # Default date range if not specified (use timezone-aware UTC)
     if start_date is None:
-        start_date = datetime.utcnow() - timedelta(days=30)
+        start_date = datetime.now(timezone.utc) - timedelta(days=30)
     if end_date is None:
-        end_date = datetime.utcnow()
+        end_date = datetime.now(timezone.utc)
 
     skip = (page - 1) * page_size
 
@@ -628,11 +628,11 @@ async def export_audit_log(
     Returns:
         JSON or CSV file download
     """
-    # Default date range
+    # Default date range (use timezone-aware UTC)
     if start_date is None:
-        start_date = datetime.utcnow() - timedelta(days=30)
+        start_date = datetime.now(timezone.utc) - timedelta(days=30)
     if end_date is None:
-        end_date = datetime.utcnow()
+        end_date = datetime.now(timezone.utc)
 
     # Log export request
     await service.log_data_access(
@@ -666,7 +666,7 @@ async def export_audit_log(
             content=content,
             media_type="application/json",
             headers={
-                "Content-Disposition": f"attachment; filename=audit_log_{datetime.utcnow().strftime('%Y%m%d')}.json"
+                "Content-Disposition": f"attachment; filename=audit_log_{datetime.now(timezone.utc).strftime('%Y%m%d')}.json"
             },
         )
     else:  # CSV
@@ -711,7 +711,7 @@ async def export_audit_log(
             content=content,
             media_type="text/csv",
             headers={
-                "Content-Disposition": f"attachment; filename=audit_log_{datetime.utcnow().strftime('%Y%m%d')}.csv"
+                "Content-Disposition": f"attachment; filename=audit_log_{datetime.now(timezone.utc).strftime('%Y%m%d')}.csv"
             },
         )
 
@@ -821,7 +821,7 @@ async def access_call_recording(
     )
 
     # Calculate access expiry (URL valid for 1 hour)
-    access_expires_at = datetime.utcnow() + timedelta(hours=1)
+    access_expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
 
     return RecordingResponse(
         call_id=call_id,

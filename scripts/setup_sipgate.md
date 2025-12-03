@@ -42,10 +42,18 @@ telephony:
 integrations:
   sipgate:
     enabled: true
-    token_id: "your-token-id"
-    token: "your-token"
-    webhook_secret: "your-webhook-secret"
+    # These values should reference environment variables - never commit actual secrets!
+    token_id: ${SIPGATE_TOKEN_ID}
+    token: ${SIPGATE_TOKEN}
+    webhook_secret: ${SIPGATE_WEBHOOK_SECRET}
 ```
+
+> **Security Note**: Set these environment variables securely and never commit them to version control:
+> ```bash
+> export SIPGATE_TOKEN_ID="your-token-id"
+> export SIPGATE_TOKEN="your-token"
+> export SIPGATE_WEBHOOK_SECRET="your-webhook-secret"
+> ```
 
 ## Step 4: Configure Routing
 

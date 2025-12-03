@@ -76,7 +76,7 @@ def get_prompts_module(industry: str, language: str = "de") -> Any:
         )
         return module
     except ImportError:
-        log.error(
+        log.exception(
             "Failed to load prompts module",
             industry=industry,
             language=language,

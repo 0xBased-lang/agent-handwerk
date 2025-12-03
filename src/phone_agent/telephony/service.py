@@ -275,11 +275,17 @@ class TelephonyService:
         if not self.call_handler.is_in_call:
             return
 
+        # Validate call state before accessing conversation
+        current_call = self.call_handler.current_call
+        if current_call is None or current_call.conversation is None:
+            log.warning("Audio received but no active conversation", call_id=str(call_id))
+            return
+
         try:
             # Process through AI pipeline
             response_text, response_audio = await self.conversation_engine.process_audio(
                 audio,
-                self.call_handler.current_call.conversation.id,
+                current_call.conversation.id,
             )
 
             log.info("AI response", text=response_text[:50])
@@ -287,8 +293,8 @@ class TelephonyService:
             # Send response audio back
             await self.audio_bridge.send_audio(call_id, response_audio)
 
-        except Exception as e:
-            log.error("Audio processing error", error=str(e))
+        except Exception:
+            log.exception("Audio processing error", call_id=str(call_id))
 
     async def _on_audio_connection(self, call_id: UUID) -> None:
         """Handle new audio connection."""

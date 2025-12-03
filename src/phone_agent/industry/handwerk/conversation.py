@@ -731,8 +731,10 @@ class HandwerkConversationManager:
         """Handle time slot selection."""
         input_lower = user_input.lower()
 
-        # Check for callback request
-        if "rückruf" in input_lower or "ja" in input_lower and not context.offered_slots:
+        # Check for callback request:
+        # - "rückruf" (callback) always triggers callback scheduling
+        # - "ja" (yes) without offered slots triggers callback (user confused)
+        if "rückruf" in input_lower or ("ja" in input_lower and not context.offered_slots):
             message = (
                 "Kein Problem, ich habe Sie für einen Rückruf vorgemerkt. "
                 "Wir melden uns, sobald ein Termin frei wird. "
@@ -972,15 +974,24 @@ class HandwerkConversationManager:
         )
 
 
-# Singleton instance
-_conversation_manager: HandwerkConversationManager | None = None
+# Manager instances keyed by company name (thread-safe)
+_conversation_managers: dict[str, HandwerkConversationManager] = {}
+_conversation_manager_lock = __import__("threading").Lock()
 
 
 def get_conversation_manager(
     company_name: str = "Mustermann GmbH",
 ) -> HandwerkConversationManager:
-    """Get or create conversation manager singleton."""
-    global _conversation_manager
-    if _conversation_manager is None:
-        _conversation_manager = HandwerkConversationManager(company_name=company_name)
-    return _conversation_manager
+    """Get or create conversation manager for a specific company.
+
+    Thread-safe via double-checked locking pattern.
+    Each company gets its own manager instance.
+    """
+    if company_name not in _conversation_managers:
+        with _conversation_manager_lock:
+            # Double-check after acquiring lock
+            if company_name not in _conversation_managers:
+                _conversation_managers[company_name] = HandwerkConversationManager(
+                    company_name=company_name
+                )
+    return _conversation_managers[company_name]

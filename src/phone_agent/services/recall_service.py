@@ -13,7 +13,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, Sequence
 from uuid import UUID
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import Integer, and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from itf_shared import get_logger

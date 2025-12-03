@@ -463,13 +463,14 @@ async def handle_audio_webhook(
                 service.call_handler.current_call.conversation.id,
             )
 
-            # Return audio response as base64
+            # Encode audio response as base64 for transmission
             response_audio_b64 = base64.b64encode(response_audio).decode()
 
             return WebhookResponse(
                 success=True,
                 action="audio_response",
                 message=response_text[:100],
+                data={"audio": response_audio_b64},  # Include audio in response
             )
 
         return WebhookResponse(success=False, message="No active call")

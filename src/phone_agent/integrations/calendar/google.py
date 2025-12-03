@@ -8,7 +8,7 @@ German healthcare practices.
 from __future__ import annotations
 
 import asyncio
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -197,10 +197,10 @@ class GoogleCalendarIntegration(CalendarIntegration):
         """
         cache_key = f"{start.isoformat()}_{end.isoformat()}"
 
-        # Check cache
+        # Check cache (use UTC for consistent timezone comparison)
         if cache_key in self._freebusy_cache:
             cached_time, cached_data = self._freebusy_cache[cache_key]
-            if (datetime.now() - cached_time).total_seconds() < self._cache_ttl_seconds:
+            if (datetime.now(timezone.utc) - cached_time).total_seconds() < self._cache_ttl_seconds:
                 return cached_data
 
         try:
@@ -223,8 +223,8 @@ class GoogleCalendarIntegration(CalendarIntegration):
                 self._calendar_id, {}
             ).get("busy", [])
 
-            # Cache the result
-            self._freebusy_cache[cache_key] = (datetime.now(), busy_periods)
+            # Cache the result (store UTC timestamp for consistent comparison)
+            self._freebusy_cache[cache_key] = (datetime.now(timezone.utc), busy_periods)
 
             return busy_periods
 

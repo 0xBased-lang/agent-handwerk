@@ -587,8 +587,7 @@ class DashboardSnapshotRepository(BaseRepository[DashboardSnapshotModel]):
         """
         cutoff = datetime.utcnow() - timedelta(days=days)
 
-        filters = {"snapshot_at": cutoff}  # This won't work with bulk_delete
-        # Use direct delete instead
+        # Use direct SQLAlchemy delete for bulk operation
         from sqlalchemy import delete
 
         conditions = [self._model.snapshot_at < cutoff]

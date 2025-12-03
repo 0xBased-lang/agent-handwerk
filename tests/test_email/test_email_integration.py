@@ -560,7 +560,7 @@ class TestEmailFactory:
             from phone_agent.integrations.email import smtp
             with patch.object(smtp, "SMTPEmailGateway") as mock_gateway:
                 mock_gateway.return_value = MagicMock()
-                gateway = get_email_gateway()
+                _ = get_email_gateway()  # Call to trigger gateway creation
 
                 mock_gateway.assert_called_once()
 

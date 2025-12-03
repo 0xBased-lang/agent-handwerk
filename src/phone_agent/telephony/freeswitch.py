@@ -77,7 +77,7 @@ class FreeSwitchConfig:
     # Connection
     host: str = "127.0.0.1"
     port: int = 8021
-    password: str = "ClueCon"
+    password: str = ""  # Required - must be provided from config/environment
 
     # Audio streaming
     audio_ws_port: int = 8080  # WebSocket for audio
