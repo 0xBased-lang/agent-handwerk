@@ -7,7 +7,7 @@ Supports multiple providers (SMTP, SendGrid) with unified status tracking.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -314,35 +314,35 @@ class EmailMessageModel(Base, UUIDMixin, TimestampMixin):
     def mark_queued(self) -> None:
         """Mark message as queued for sending."""
         self.status = "queued"
-        self.queued_at = datetime.now()
+        self.queued_at = datetime.now(timezone.utc)
 
     def mark_sent(self, provider_message_id: str | None = None) -> None:
         """Mark message as sent."""
         self.status = "sent"
-        self.sent_at = datetime.now()
+        self.sent_at = datetime.now(timezone.utc)
         if provider_message_id:
             self.provider_message_id = provider_message_id
 
     def mark_delivered(self) -> None:
         """Mark message as delivered."""
         self.status = "delivered"
-        self.delivered_at = datetime.now()
+        self.delivered_at = datetime.now(timezone.utc)
 
     def mark_opened(self) -> None:
         """Mark message as opened."""
         if self.opened_at is None:
-            self.opened_at = datetime.now()
+            self.opened_at = datetime.now(timezone.utc)
         self.open_count += 1
-        self.last_opened_at = datetime.now()
+        self.last_opened_at = datetime.now(timezone.utc)
         if self.status in ("sent", "delivered"):
             self.status = "opened"
 
     def mark_clicked(self) -> None:
         """Mark message as clicked."""
         if self.clicked_at is None:
-            self.clicked_at = datetime.now()
+            self.clicked_at = datetime.now(timezone.utc)
         self.click_count += 1
-        self.last_clicked_at = datetime.now()
+        self.last_clicked_at = datetime.now(timezone.utc)
         if self.status in ("sent", "delivered", "opened"):
             self.status = "clicked"
 
@@ -353,7 +353,7 @@ class EmailMessageModel(Base, UUIDMixin, TimestampMixin):
     ) -> None:
         """Mark message as bounced."""
         self.status = "bounced"
-        self.bounced_at = datetime.now()
+        self.bounced_at = datetime.now(timezone.utc)
         self.error_code = error_code
         self.error_message = error_message
 
@@ -364,7 +364,7 @@ class EmailMessageModel(Base, UUIDMixin, TimestampMixin):
     ) -> None:
         """Mark message as failed."""
         self.status = "failed"
-        self.failed_at = datetime.now()
+        self.failed_at = datetime.now(timezone.utc)
         self.error_code = error_code
         self.error_message = error_message
 
@@ -379,9 +379,9 @@ class EmailMessageModel(Base, UUIDMixin, TimestampMixin):
         """Increment retry count and schedule next retry."""
         self.retry_count += 1
         self.status = "pending"
-        self.next_retry_at = datetime.now() + timedelta(seconds=next_retry_delay_seconds)
+        self.next_retry_at = datetime.now(timezone.utc) + timedelta(seconds=next_retry_delay_seconds)
 
     def record_webhook(self) -> None:
         """Record that a webhook was received."""
         self.webhook_received += 1
-        self.last_webhook_at = datetime.now()
+        self.last_webhook_at = datetime.now(timezone.utc)

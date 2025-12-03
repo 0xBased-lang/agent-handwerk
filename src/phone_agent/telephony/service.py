@@ -168,6 +168,13 @@ class TelephonyService:
 
     async def _start_freeswitch(self) -> None:
         """Start FreeSWITCH backend."""
+        if not self.config.freeswitch_password:
+            raise ValueError(
+                "FreeSWITCH password is required but not configured. "
+                "Set FREESWITCH_PASSWORD environment variable or provide "
+                "freeswitch_password in TelephonyServiceConfig."
+            )
+
         self.freeswitch_client = FreeSwitchClient(
             FreeSwitchConfig(
                 host=self.config.freeswitch_host,

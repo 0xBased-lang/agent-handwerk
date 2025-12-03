@@ -175,8 +175,8 @@ class CallHandler:
                 metadata=metadata or {},
             )
 
-            # Transition to RINGING (under lock to prevent races)
-            await self._transition(CallEvent.INCOMING_CALL)
+            # Transition to RINGING (caller already holds lock)
+            await self._transition(CallEvent.INCOMING_CALL, _lock_held=True)
 
             log.info(
                 "Incoming call",
@@ -198,8 +198,8 @@ class CallHandler:
             # Start conversation
             self._current_call.conversation = self.conversation_engine.start_conversation()
 
-            # Transition to GREETING
-            await self._transition(CallEvent.CALL_ANSWERED)
+            # Transition to GREETING (caller already holds lock)
+            await self._transition(CallEvent.CALL_ANSWERED, _lock_held=True)
 
             if self._on_call_start:
                 self._on_call_start(self._current_call)
@@ -344,34 +344,49 @@ class CallHandler:
 
         return call
 
-    async def _transition(self, event: CallEvent) -> None:
-        """Perform state transition based on event."""
-        if not self._current_call:
-            return
+    async def _transition(self, event: CallEvent, _lock_held: bool = False) -> None:
+        """Perform state transition based on event.
 
-        current_state = self._current_call.state
-        key = (current_state, event)
+        Args:
+            event: The event triggering the transition
+            _lock_held: Internal flag indicating if caller already holds the lock
+                       to avoid deadlock. Do not use externally.
+        """
+        async def _do_transition() -> None:
+            if not self._current_call:
+                return
 
-        if key not in self._transitions:
-            log.warning(
-                "Invalid transition",
-                current_state=current_state.name,
+            current_state = self._current_call.state
+            key = (current_state, event)
+
+            if key not in self._transitions:
+                log.warning(
+                    "Invalid transition",
+                    current_state=current_state.name,
+                    event=event.name,
+                )
+                return
+
+            new_state = self._transitions[key]
+            self._current_call.state = new_state
+
+            log.debug(
+                "State transition",
+                from_state=current_state.name,
                 event=event.name,
+                to_state=new_state.name,
             )
-            return
 
-        new_state = self._transitions[key]
-        self._current_call.state = new_state
+            if self._on_state_change:
+                self._on_state_change(current_state, new_state, self._current_call)
 
-        log.debug(
-            "State transition",
-            from_state=current_state.name,
-            event=event.name,
-            to_state=new_state.name,
-        )
-
-        if self._on_state_change:
-            self._on_state_change(current_state, new_state, self._current_call)
+        if _lock_held:
+            # Caller already holds lock, execute directly
+            await _do_transition()
+        else:
+            # Acquire lock for thread-safe state transitions
+            async with self._call_lock:
+                await _do_transition()
 
     def on_state_change(
         self,

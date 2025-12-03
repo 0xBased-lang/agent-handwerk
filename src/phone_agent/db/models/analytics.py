@@ -7,7 +7,7 @@ Contains models for aggregated metrics and dashboard data:
 """
 from __future__ import annotations
 
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -743,7 +743,7 @@ class CampaignContactModel(Base, UUIDMixin, TimestampMixin):
         """Schedule the next call attempt."""
         from datetime import timedelta
         if self.can_attempt():
-            self.next_attempt_at = datetime.now() + timedelta(hours=interval_hours)
+            self.next_attempt_at = datetime.now(timezone.utc) + timedelta(hours=interval_hours)
             self.status = "scheduled"
         else:
             self.status = "failed" if self.attempts >= self.max_attempts else self.status
@@ -755,10 +755,8 @@ class CampaignContactModel(Base, UUIDMixin, TimestampMixin):
         call_id: UUID | None = None,
     ) -> None:
         """Record a call attempt result."""
-        from datetime import datetime as dt
-
         self.attempts += 1
-        self.last_attempt_at = dt.now()
+        self.last_attempt_at = datetime.now(timezone.utc)
         self.last_call_result = result
         self.last_call_duration = duration
         self.last_call_id = call_id
@@ -771,7 +769,7 @@ class CampaignContactModel(Base, UUIDMixin, TimestampMixin):
         elif result == "opt_out":
             self.status = "opted_out"
             self.opted_out = True
-            self.opted_out_at = dt.now()
+            self.opted_out_at = datetime.now(timezone.utc)
         elif self.attempts >= self.max_attempts:
             self.status = "failed"
         else:

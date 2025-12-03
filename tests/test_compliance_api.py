@@ -328,17 +328,25 @@ class TestAPIRouterRegistration:
         """Test that compliance routes have correct tags."""
         from phone_agent.main import app
 
-        compliance_routes = [
-            r for r in app.routes
-            if hasattr(r, 'tags') and 'Compliance' in getattr(r, 'tags', [])
+        # Verify compliance routes are registered by checking for expected paths
+        # Compliance routes are at /api/v1/ prefix, not /compliance/ prefix
+        route_paths = [getattr(r, 'path', '') for r in app.routes]
+
+        # Check for compliance-related route paths (consent and audit-log)
+        compliance_paths = [
+            '/consent',  # Consent management routes
+            '/audit-log',  # Audit logging routes
         ]
 
-        # At least some routes should have Compliance tag
-        # (Note: FastAPI includes routes may not have tags at top level)
-        # This is a sanity check that the router was registered
-        # The compliance routes are registered under include_router which
-        # may not propagate tags directly, so we verify the router exists
-        assert app.routes is not None, "App should have routes registered"
+        found_compliance_routes = any(
+            any(cp in path for cp in compliance_paths)
+            for path in route_paths
+        )
+
+        assert found_compliance_routes, (
+            f"Expected at least one compliance route. "
+            f"Available routes: {[p for p in route_paths if 'consent' in p.lower() or 'audit' in p.lower()]}"
+        )
 
 
 # ============================================================================

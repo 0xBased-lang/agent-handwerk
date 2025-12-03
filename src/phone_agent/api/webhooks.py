@@ -463,8 +463,22 @@ async def handle_audio_webhook(
                 service.call_handler.current_call.conversation.id,
             )
 
+            # Convert audio to bytes if it's a numpy array
+            if hasattr(response_audio, 'tobytes'):
+                # numpy array - convert to bytes (assumes int16 format)
+                audio_bytes = response_audio.tobytes()
+            else:
+                audio_bytes = response_audio
+
+            # Check size before encoding
+            if len(audio_bytes) > MAX_AUDIO_BASE64_LENGTH * 3 // 4:  # Base64 is ~4/3 size of binary
+                return WebhookResponse(
+                    success=False,
+                    message="Audio response too large",
+                )
+
             # Encode audio response as base64 for transmission
-            response_audio_b64 = base64.b64encode(response_audio).decode()
+            response_audio_b64 = base64.b64encode(audio_bytes).decode()
 
             return WebhookResponse(
                 success=True,
