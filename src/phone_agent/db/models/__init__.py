@@ -25,6 +25,11 @@ Analytics Models:
 
 SMS Models:
 - SMSMessageModel: SMS delivery tracking
+
+Handwerk Models:
+- JobModel: Service requests and work orders
+- QuoteModel: Cost estimates and quotes
+- QuoteItemModel: Line items for quotes
 """
 
 # Core models
@@ -66,6 +71,12 @@ from phone_agent.db.models.analytics import (
     DashboardSnapshotModel,
 )
 
+# Handwerk (Trades) models
+from phone_agent.db.models.handwerk import (
+    JobModel,
+    QuoteModel,
+)
+
 __all__ = [
     # Core
     "CallModel",
@@ -88,4 +99,7 @@ __all__ = [
     "RecallCampaignModel",
     "CampaignContactModel",
     "DashboardSnapshotModel",
+    # Handwerk
+    "JobModel",
+    "QuoteModel",
 ]

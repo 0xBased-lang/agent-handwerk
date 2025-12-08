@@ -1,12 +1,29 @@
 """Handwerk (Trades) API endpoints."""
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
+from decimal import Decimal
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
+from sqlalchemy import select, and_, or_
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from phone_agent.db import get_db
+from phone_agent.db.models import (
+    AppointmentModel,
+    ContactModel,
+    JobModel,
+    QuoteModel,
+)
+from phone_agent.db.models.handwerk import (
+    JobStatus,
+    JobUrgency,
+    TradeCategory as DBTradeCategory,
+    QuoteStatus,
+)
 
 from phone_agent.industry.handwerk import (
     # Triage
@@ -748,3 +765,662 @@ async def get_maintenance_due(
     )
 
     return [e.to_dict() for e in equipment]
+
+
+# ====================
+# Calendar Endpoints (Database-backed)
+# ====================
+
+class CalendarEntry(BaseModel):
+    """Calendar entry for display."""
+    id: str
+    type: str  # job, appointment
+    title: str
+    customer_name: str | None = None
+    address: str | None = None
+    date: date
+    time: str | None = None
+    duration_minutes: int = 60
+    status: str
+    urgency: str | None = None
+    trade_category: str | None = None
+
+
+@router.get("/calendar")
+async def get_calendar(
+    start_date: date = Query(..., description="Start date (inclusive)"),
+    end_date: date = Query(..., description="End date (inclusive)"),
+    technician_id: str | None = Query(default=None, description="Filter by technician"),
+    trade_category: str | None = Query(default=None, description="Filter by trade"),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Get calendar entries for a date range.
+
+    Returns jobs and appointments grouped by date.
+    """
+    # Build job query
+    job_query = select(JobModel).where(
+        and_(
+            JobModel.scheduled_date >= start_date,
+            JobModel.scheduled_date <= end_date,
+            JobModel.is_deleted == False,
+        )
+    )
+
+    if technician_id:
+        try:
+            tech_uuid = UUID(technician_id)
+            job_query = job_query.where(JobModel.technician_id == tech_uuid)
+        except ValueError:
+            pass
+
+    if trade_category:
+        job_query = job_query.where(JobModel.trade_category == trade_category)
+
+    job_query = job_query.order_by(JobModel.scheduled_date, JobModel.scheduled_time)
+
+    result = await db.execute(job_query)
+    jobs = result.scalars().all()
+
+    # Group by date
+    entries_by_date: dict[str, list[dict]] = {}
+    for job in jobs:
+        date_str = job.scheduled_date.isoformat() if job.scheduled_date else "unscheduled"
+        if date_str not in entries_by_date:
+            entries_by_date[date_str] = []
+
+        # Get customer name
+        customer_name = None
+        if job.contact:
+            customer_name = f"{job.contact.first_name} {job.contact.last_name}"
+
+        entries_by_date[date_str].append({
+            "id": str(job.id),
+            "type": "job",
+            "job_number": job.job_number,
+            "title": job.title,
+            "customer_name": customer_name,
+            "address": f"{job.address_street} {job.address_number or ''}, {job.address_zip} {job.address_city}" if job.address_street else None,
+            "date": job.scheduled_date.isoformat() if job.scheduled_date else None,
+            "time": job.scheduled_time.strftime("%H:%M") if job.scheduled_time else None,
+            "duration_minutes": job.estimated_duration_minutes or 60,
+            "status": job.status,
+            "urgency": job.urgency,
+            "trade_category": job.trade_category,
+        })
+
+    return {
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+        "total_entries": sum(len(v) for v in entries_by_date.values()),
+        "entries_by_date": entries_by_date,
+    }
+
+
+@router.get("/calendar/{date_str}")
+async def get_day_schedule(
+    date_str: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Get detailed schedule for a specific day."""
+    try:
+        target_date = date.fromisoformat(date_str)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
+
+    # Get jobs for the day
+    job_query = select(JobModel).where(
+        and_(
+            JobModel.scheduled_date == target_date,
+            JobModel.is_deleted == False,
+        )
+    ).order_by(JobModel.scheduled_time)
+
+    result = await db.execute(job_query)
+    jobs = result.scalars().all()
+
+    schedule = []
+    for job in jobs:
+        customer_name = None
+        customer_phone = None
+        if job.contact:
+            customer_name = f"{job.contact.first_name} {job.contact.last_name}"
+            customer_phone = job.contact.phone
+
+        schedule.append({
+            "id": str(job.id),
+            "job_number": job.job_number,
+            "title": job.title,
+            "description": job.description,
+            "customer": {
+                "name": customer_name,
+                "phone": customer_phone,
+            },
+            "address": {
+                "street": job.address_street,
+                "number": job.address_number,
+                "zip": job.address_zip,
+                "city": job.address_city,
+            },
+            "time": job.scheduled_time.strftime("%H:%M") if job.scheduled_time else None,
+            "duration_minutes": job.estimated_duration_minutes or 60,
+            "status": job.status,
+            "urgency": job.urgency,
+            "trade_category": job.trade_category,
+            "technician_id": str(job.technician_id) if job.technician_id else None,
+            "access_notes": job.access_notes,
+            "customer_notes": job.customer_notes,
+        })
+
+    return {
+        "date": target_date.isoformat(),
+        "weekday": target_date.strftime("%A"),
+        "total_jobs": len(schedule),
+        "schedule": schedule,
+    }
+
+
+# ====================
+# Jobs API (Database-backed)
+# ====================
+
+class JobCreateRequest(BaseModel):
+    """Request model for creating a job."""
+    title: str = Field(..., description="Job title/summary")
+    description: str | None = Field(default=None, description="Detailed description")
+    trade_category: str = Field(default="allgemein", description="Trade category")
+    urgency: str = Field(default="normal", description="Urgency level")
+
+    # Customer
+    contact_id: str | None = Field(default=None, description="Existing customer UUID")
+    customer_name: str | None = Field(default=None, description="Customer name (if new)")
+    customer_phone: str | None = Field(default=None, description="Customer phone (if new)")
+
+    # Location
+    address_street: str | None = None
+    address_number: str | None = None
+    address_zip: str | None = None
+    address_city: str | None = None
+    property_type: str | None = None
+    access_notes: str | None = None
+
+    # Scheduling preferences
+    preferred_date: date | None = None
+    preferred_time_window: str | None = None
+
+    # Notes
+    customer_notes: str | None = None
+
+
+class JobUpdateRequest(BaseModel):
+    """Request model for updating a job."""
+    title: str | None = None
+    description: str | None = None
+    status: str | None = None
+    urgency: str | None = None
+    technician_id: str | None = None
+    scheduled_date: date | None = None
+    scheduled_time: str | None = None  # HH:MM format
+    estimated_duration_minutes: int | None = None
+    estimated_cost: float | None = None
+    actual_cost: float | None = None
+    technician_notes: str | None = None
+    internal_notes: str | None = None
+
+
+def _generate_job_number() -> str:
+    """Generate a unique job number."""
+    now = datetime.now()
+    return f"JOB-{now.year}-{now.strftime('%m%d%H%M%S')}"
+
+
+@router.post("/jobs")
+async def create_job(
+    request: JobCreateRequest,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Create a new job/service request."""
+    # Generate job number
+    job_number = _generate_job_number()
+
+    # Handle contact
+    contact_id = None
+    if request.contact_id:
+        try:
+            contact_id = UUID(request.contact_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid contact_id format")
+
+    # Create job
+    job = JobModel(
+        id=uuid4(),
+        job_number=job_number,
+        title=request.title,
+        description=request.description,
+        trade_category=request.trade_category,
+        urgency=request.urgency,
+        status=JobStatus.REQUESTED,
+        contact_id=contact_id,
+        address_street=request.address_street,
+        address_number=request.address_number,
+        address_zip=request.address_zip,
+        address_city=request.address_city,
+        property_type=request.property_type,
+        access_notes=request.access_notes,
+        preferred_date=request.preferred_date,
+        preferred_time_window=request.preferred_time_window,
+        customer_notes=request.customer_notes,
+    )
+
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
+
+    return job.to_dict()
+
+
+@router.get("/jobs")
+async def list_jobs(
+    status: str | None = Query(default=None, description="Filter by status"),
+    urgency: str | None = Query(default=None, description="Filter by urgency"),
+    trade_category: str | None = Query(default=None, description="Filter by trade"),
+    from_date: date | None = Query(default=None, description="Scheduled from date"),
+    to_date: date | None = Query(default=None, description="Scheduled to date"),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """List jobs with optional filters."""
+    query = select(JobModel).where(JobModel.is_deleted == False)
+
+    if status:
+        query = query.where(JobModel.status == status)
+    if urgency:
+        query = query.where(JobModel.urgency == urgency)
+    if trade_category:
+        query = query.where(JobModel.trade_category == trade_category)
+    if from_date:
+        query = query.where(JobModel.scheduled_date >= from_date)
+    if to_date:
+        query = query.where(JobModel.scheduled_date <= to_date)
+
+    query = query.order_by(JobModel.created_at.desc()).offset(offset).limit(limit)
+
+    result = await db.execute(query)
+    jobs = result.scalars().all()
+
+    return {
+        "jobs": [j.to_dict() for j in jobs],
+        "count": len(jobs),
+        "offset": offset,
+        "limit": limit,
+    }
+
+
+@router.get("/jobs/{job_id}")
+async def get_job(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Get detailed job information."""
+    try:
+        job_uuid = UUID(job_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid job ID")
+
+    result = await db.execute(
+        select(JobModel).where(
+            and_(JobModel.id == job_uuid, JobModel.is_deleted == False)
+        )
+    )
+    job = result.scalar_one_or_none()
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    job_dict = job.to_dict()
+
+    # Include quotes if any
+    if job.quotes:
+        job_dict["quotes"] = [q.to_dict() for q in job.quotes]
+
+    return job_dict
+
+
+@router.patch("/jobs/{job_id}")
+async def update_job(
+    job_id: str,
+    request: JobUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Update a job."""
+    try:
+        job_uuid = UUID(job_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid job ID")
+
+    result = await db.execute(
+        select(JobModel).where(
+            and_(JobModel.id == job_uuid, JobModel.is_deleted == False)
+        )
+    )
+    job = result.scalar_one_or_none()
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Update fields
+    if request.title is not None:
+        job.title = request.title
+    if request.description is not None:
+        job.description = request.description
+    if request.status is not None:
+        job.status = request.status
+        # Track completion
+        if request.status == JobStatus.COMPLETED:
+            job.completed_at = datetime.now()
+        elif request.status == JobStatus.IN_PROGRESS:
+            job.started_at = datetime.now()
+    if request.urgency is not None:
+        job.urgency = request.urgency
+    if request.technician_id is not None:
+        try:
+            job.technician_id = UUID(request.technician_id)
+        except ValueError:
+            pass
+    if request.scheduled_date is not None:
+        job.scheduled_date = request.scheduled_date
+    if request.scheduled_time is not None:
+        from datetime import time as time_type
+        try:
+            parts = request.scheduled_time.split(":")
+            job.scheduled_time = time_type(int(parts[0]), int(parts[1]))
+        except (ValueError, IndexError):
+            pass
+    if request.estimated_duration_minutes is not None:
+        job.estimated_duration_minutes = request.estimated_duration_minutes
+    if request.estimated_cost is not None:
+        job.estimated_cost = Decimal(str(request.estimated_cost))
+    if request.actual_cost is not None:
+        job.actual_cost = Decimal(str(request.actual_cost))
+    if request.technician_notes is not None:
+        job.technician_notes = request.technician_notes
+    if request.internal_notes is not None:
+        job.internal_notes = request.internal_notes
+
+    await db.commit()
+    await db.refresh(job)
+
+    return job.to_dict()
+
+
+@router.delete("/jobs/{job_id}")
+async def delete_job(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, str]:
+    """Soft delete a job."""
+    try:
+        job_uuid = UUID(job_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid job ID")
+
+    result = await db.execute(
+        select(JobModel).where(
+            and_(JobModel.id == job_uuid, JobModel.is_deleted == False)
+        )
+    )
+    job = result.scalar_one_or_none()
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    job.is_deleted = True
+    job.deleted_at = datetime.now()
+    await db.commit()
+
+    return {"message": "Job deleted", "id": job_id}
+
+
+# ====================
+# Quotes API (Database-backed)
+# ====================
+
+class QuoteLineItem(BaseModel):
+    """Quote line item."""
+    description: str
+    quantity: float = 1.0
+    unit: str = "Stück"
+    unit_price: float
+    total: float | None = None
+
+
+class QuoteCreateRequest(BaseModel):
+    """Request model for creating a quote."""
+    job_id: str = Field(..., description="Job UUID")
+    items: list[QuoteLineItem] = Field(..., description="Line items")
+    valid_days: int = Field(default=30, ge=1, le=90, description="Validity in days")
+    tax_rate: float = Field(default=19.0, description="Tax rate percentage")
+    discount_amount: float = Field(default=0, description="Discount amount")
+    payment_terms: str | None = None
+    notes: str | None = None
+
+
+def _generate_quote_number() -> str:
+    """Generate a unique quote number."""
+    now = datetime.now()
+    return f"QUO-{now.year}-{now.strftime('%m%d%H%M%S')}"
+
+
+@router.post("/quotes")
+async def create_quote(
+    request: QuoteCreateRequest,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Create a quote for a job."""
+    try:
+        job_uuid = UUID(request.job_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid job_id format")
+
+    # Verify job exists
+    result = await db.execute(
+        select(JobModel).where(JobModel.id == job_uuid)
+    )
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Calculate totals
+    items_json = []
+    subtotal = Decimal("0")
+    for item in request.items:
+        item_total = Decimal(str(item.quantity)) * Decimal(str(item.unit_price))
+        items_json.append({
+            "description": item.description,
+            "quantity": item.quantity,
+            "unit": item.unit,
+            "unit_price": item.unit_price,
+            "total": float(item_total),
+        })
+        subtotal += item_total
+
+    tax_rate = Decimal(str(request.tax_rate))
+    tax_amount = (subtotal * tax_rate / Decimal("100")).quantize(Decimal("0.01"))
+    discount = Decimal(str(request.discount_amount))
+    total = subtotal + tax_amount - discount
+
+    # Create quote
+    quote = QuoteModel(
+        id=uuid4(),
+        quote_number=_generate_quote_number(),
+        job_id=job_uuid,
+        contact_id=job.contact_id,
+        status=QuoteStatus.DRAFT,
+        valid_from=date.today(),
+        valid_until=date.today() + timedelta(days=request.valid_days),
+        items_json=items_json,
+        subtotal=subtotal,
+        tax_rate=tax_rate,
+        tax_amount=tax_amount,
+        discount_amount=discount,
+        total=total,
+        payment_terms=request.payment_terms,
+        notes=request.notes,
+    )
+
+    db.add(quote)
+
+    # Update job status
+    if job.status == JobStatus.REQUESTED:
+        job.status = JobStatus.QUOTED
+
+    await db.commit()
+    await db.refresh(quote)
+
+    return quote.to_dict()
+
+
+@router.get("/quotes/{quote_id}")
+async def get_quote(
+    quote_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Get quote details."""
+    try:
+        quote_uuid = UUID(quote_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid quote ID")
+
+    result = await db.execute(
+        select(QuoteModel).where(
+            and_(QuoteModel.id == quote_uuid, QuoteModel.is_deleted == False)
+        )
+    )
+    quote = result.scalar_one_or_none()
+
+    if not quote:
+        raise HTTPException(status_code=404, detail="Quote not found")
+
+    return quote.to_dict()
+
+
+@router.patch("/quotes/{quote_id}/status")
+async def update_quote_status(
+    quote_id: str,
+    status: str = Query(..., description="New status: sent, accepted, rejected"),
+    rejection_reason: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Update quote status."""
+    try:
+        quote_uuid = UUID(quote_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid quote ID")
+
+    result = await db.execute(
+        select(QuoteModel).where(
+            and_(QuoteModel.id == quote_uuid, QuoteModel.is_deleted == False)
+        )
+    )
+    quote = result.scalar_one_or_none()
+
+    if not quote:
+        raise HTTPException(status_code=404, detail="Quote not found")
+
+    # Update status and timestamps
+    quote.status = status
+    now = datetime.now()
+
+    if status == QuoteStatus.SENT:
+        quote.sent_at = now
+    elif status == QuoteStatus.ACCEPTED:
+        quote.accepted_at = now
+        # Update job status
+        if quote.job:
+            quote.job.status = JobStatus.ACCEPTED
+    elif status == QuoteStatus.REJECTED:
+        quote.rejected_at = now
+        quote.rejection_reason = rejection_reason
+
+    await db.commit()
+    await db.refresh(quote)
+
+    return quote.to_dict()
+
+
+@router.get("/jobs/{job_id}/quotes")
+async def list_job_quotes(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> list[dict[str, Any]]:
+    """List all quotes for a job."""
+    try:
+        job_uuid = UUID(job_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid job ID")
+
+    result = await db.execute(
+        select(QuoteModel).where(
+            and_(
+                QuoteModel.job_id == job_uuid,
+                QuoteModel.is_deleted == False,
+            )
+        ).order_by(QuoteModel.created_at.desc())
+    )
+    quotes = result.scalars().all()
+
+    return [q.to_dict() for q in quotes]
+
+
+# ====================
+# Dashboard/Stats Endpoints
+# ====================
+
+@router.get("/dashboard/stats")
+async def get_dashboard_stats(
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Get dashboard statistics for Handwerker demo."""
+    today = date.today()
+    week_start = today - timedelta(days=today.weekday())
+    week_end = week_start + timedelta(days=6)
+
+    # Count jobs by status
+    jobs_result = await db.execute(
+        select(JobModel).where(JobModel.is_deleted == False)
+    )
+    jobs = jobs_result.scalars().all()
+
+    status_counts = {}
+    urgency_counts = {}
+    today_jobs = 0
+    week_jobs = 0
+
+    for job in jobs:
+        # Status counts
+        status_counts[job.status] = status_counts.get(job.status, 0) + 1
+        # Urgency counts
+        urgency_counts[job.urgency] = urgency_counts.get(job.urgency, 0) + 1
+        # Today's jobs
+        if job.scheduled_date == today:
+            today_jobs += 1
+        # This week's jobs
+        if job.scheduled_date and week_start <= job.scheduled_date <= week_end:
+            week_jobs += 1
+
+    return {
+        "date": today.isoformat(),
+        "jobs": {
+            "total": len(jobs),
+            "today": today_jobs,
+            "this_week": week_jobs,
+            "by_status": status_counts,
+            "by_urgency": urgency_counts,
+        },
+        "quick_actions": [
+            {"label": "Neuer Auftrag", "endpoint": "POST /handwerk/jobs"},
+            {"label": "Kalender heute", "endpoint": f"GET /handwerk/calendar/{today.isoformat()}"},
+            {"label": "Offene Notfälle", "endpoint": "GET /handwerk/jobs?urgency=notfall&status=requested"},
+        ],
+    }

@@ -105,16 +105,16 @@ class Appointment(BaseModel):
             appointment_date=model.appointment_date,
             appointment_time=model.appointment_time,
             duration_minutes=model.duration_minutes or 15,
-            type=model.appointment_type or "consultation",
+            type=model.type or "consultation",
             status=model.status,
             notes=model.notes,
             reminder_sent=model.reminder_sent or False,
             created_at=model.created_at,
             created_by=model.created_by or "phone-agent",
-            call_id=model.call_id,
-            contact_id=model.contact_id,
-            industry=model.industry,
-            metadata=model.metadata or {},
+            call_id=UUID(model.call_id) if model.call_id else None,
+            contact_id=UUID(model.contact_id) if model.contact_id else None,
+            industry=None,  # Not stored in model
+            metadata=model.metadata_json or {},
         )
 
 
@@ -333,12 +333,9 @@ async def create_appointment(
         appointment_date=data.appointment_date,
         appointment_time=data.appointment_time,
         duration_minutes=data.duration_minutes,
-        appointment_type=data.type.value,
+        type=data.type.value,
         status=AppointmentStatus.SCHEDULED.value,
         notes=data.notes,
-        call_id=data.call_id,
-        industry=data.industry,
-        created_by="phone-agent",
     )
 
     created = await repo.create(appointment)

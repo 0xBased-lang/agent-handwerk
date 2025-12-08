@@ -105,30 +105,21 @@ class SpeechToText:
         try:
             from faster_whisper import WhisperModel
 
-            # Determine model source
-            model_dir = self.model_path / self.model_name.replace("/", "_")
-            if model_dir.exists():
-                model_source = str(model_dir)
-            elif "/" in self.model_name:
-                # Full HuggingFace path provided (e.g., "openai/whisper-large-v3")
-                model_source = self.model_name
-            else:
-                # Short name - try primeline namespace for German models
-                model_source = f"primeline/{self.model_name}"
-
+            # Use model_path as download_root for cached models
             log.info(
                 "Loading STT model",
                 model=self.model_name,
-                source=model_source,
+                download_root=str(self.model_path),
                 device=self.device,
                 compute_type=self.compute_type,
                 language=self.language,
             )
 
             self._model = WhisperModel(
-                model_source,
+                self.model_name,
                 device=self.device,
                 compute_type=self.compute_type,
+                download_root=str(self.model_path),
             )
             self._loaded = True
 
@@ -220,15 +211,15 @@ class SpeechToText:
             language=transcribe_language,
         )
 
-        # Transcribe
+        # Transcribe with optimized VAD parameters for faster response
         segments, info = self._model.transcribe(
             audio,
             language=transcribe_language,
             beam_size=self.beam_size,
             vad_filter=self.vad_filter,
             vad_parameters=dict(
-                min_silence_duration_ms=500,
-                speech_pad_ms=200,
+                min_silence_duration_ms=300,  # Reduced from 500 for faster response
+                speech_pad_ms=100,  # Reduced from 200
             ),
         )
 

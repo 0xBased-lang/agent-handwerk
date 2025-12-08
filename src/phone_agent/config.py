@@ -91,6 +91,36 @@ class AITTSSettings(BaseModel):
     preload_voices: list[str] = []
 
 
+class CloudAISettings(BaseModel):
+    """Cloud AI provider configuration.
+
+    Supports Groq (LLM), Deepgram (STT), and ElevenLabs (TTS).
+    Set enabled=True and provider to switch from local to cloud.
+    """
+
+    # Master switch
+    enabled: bool = False
+
+    # Provider mode: local, cloud, hybrid (cloud LLM only)
+    provider: str = "local"
+
+    # Fallback to local providers on cloud errors
+    fallback_to_local: bool = True
+
+    # Groq LLM settings
+    groq_api_key: str = ""
+    groq_model: str = "llama-3.3-70b-versatile"
+
+    # Deepgram STT settings
+    deepgram_api_key: str = ""
+    deepgram_model: str = "nova-2"
+
+    # ElevenLabs TTS settings
+    elevenlabs_api_key: str = ""
+    elevenlabs_voice_id: str = "pNInz6obpgDQGcFmaJgB"  # Adam
+    elevenlabs_model: str = "eleven_flash_v2_5"
+
+
 class LanguageDetectionSettings(BaseModel):
     """Language detection configuration."""
 
@@ -118,6 +148,7 @@ class AISettings(BaseModel):
     llm: AILLMSettings = Field(default_factory=AILLMSettings)
     tts: AITTSSettings = Field(default_factory=AITTSSettings)
     language: LanguageSettings = Field(default_factory=LanguageSettings)
+    cloud: CloudAISettings = Field(default_factory=CloudAISettings)
 
 
 class SIPSettings(BaseModel):

@@ -23,6 +23,15 @@ from phone_agent.ai.status import (
     get_model_registry,
     reset_registry,
 )
+from phone_agent.ai.vad import (
+    BaseVAD,
+    SimpleVAD,
+    SileroVAD,
+    VADSegment,
+    VADFrame,
+    VADFactory,
+    get_vad,
+)
 
 __all__ = [
     # STT
@@ -50,4 +59,12 @@ __all__ = [
     "ModelStatus",
     "get_model_registry",
     "reset_registry",
+    # Voice Activity Detection
+    "BaseVAD",
+    "SimpleVAD",
+    "SileroVAD",
+    "VADSegment",
+    "VADFrame",
+    "VADFactory",
+    "get_vad",
 ]

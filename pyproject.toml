@@ -17,6 +17,7 @@ dependencies = [
     "fastapi>=0.109.0",
     "uvicorn[standard]>=0.27.0",
     "pydantic>=2.5.0",
+    "pydantic-settings>=2.0.0",
 
     # Configuration
     "dynaconf>=3.2.0",
@@ -38,6 +39,12 @@ dependencies = [
 
     # AI - Language Detection
     "speechbrain>=1.0.0",
+
+    # AI - Cloud Providers (optional)
+    "groq>=0.4.0",
+    "deepgram-sdk>=3.0.0",
+    "elevenlabs>=1.0.0",
+    "pydub>=0.25.0",  # For audio format conversion
 
     # Audio processing
     "numpy>=1.26.0",

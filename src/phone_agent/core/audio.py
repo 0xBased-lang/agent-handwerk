@@ -27,12 +27,13 @@ class AudioConfig:
 
     sample_rate: int = 16000  # 16kHz for Whisper
     channels: int = 1  # Mono
-    chunk_size: int = 1024  # Samples per chunk
+    chunk_size: int = 512  # Samples per chunk (32ms at 16kHz, optimal for Silero VAD)
     input_device: str | int | None = None  # None = default
     output_device: str | int | None = None
     vad_enabled: bool = True
-    vad_threshold: float = 0.02  # RMS threshold for speech
-    silence_duration: float = 1.0  # Seconds of silence to end utterance
+    vad_backend: str = "silero"  # "silero" (neural, accurate) or "simple" (RMS, fast)
+    vad_threshold: float = 0.5  # VAD threshold (0.5 for silero, 0.02 for simple)
+    silence_duration: float = 0.3  # Seconds of silence to end utterance
     max_recording_duration: float = 30.0  # Max seconds per utterance
 
 
@@ -51,7 +52,7 @@ class AudioPipeline:
     """Real-time audio capture and playback pipeline.
 
     Provides:
-    - Continuous audio capture with VAD
+    - Continuous audio capture with VAD (Silero or simple RMS)
     - Utterance detection (speech start/end)
     - Audio playback queue
     - Thread-safe operation
@@ -82,6 +83,34 @@ class AudioPipeline:
         self._on_utterance: Callable[[np.ndarray], None] | None = None
         self._on_speech_start: Callable[[], None] | None = None
         self._on_speech_end: Callable[[], None] | None = None
+
+        # Initialize VAD backend
+        self._vad = None
+        if self.config.vad_enabled:
+            self._init_vad()
+
+    def _init_vad(self) -> None:
+        """Initialize the VAD backend."""
+        try:
+            from phone_agent.ai.vad import get_vad
+
+            self._vad = get_vad(
+                backend=self.config.vad_backend,
+                threshold=self.config.vad_threshold,
+                min_silence_duration=self.config.silence_duration,
+                frame_size=self.config.chunk_size,
+            )
+            log.info(
+                "VAD initialized",
+                backend=self.config.vad_backend,
+                threshold=self.config.vad_threshold,
+            )
+        except Exception as e:
+            log.warning(
+                "Failed to initialize VAD, falling back to simple RMS",
+                error=str(e),
+            )
+            self._vad = None
 
     def start(self) -> None:
         """Start audio capture and playback threads."""
@@ -136,11 +165,21 @@ class AudioPipeline:
                 audio = indata[:, 0] if indata.ndim > 1 else indata.flatten()
                 audio = audio.astype(np.float32)
 
-                # Calculate RMS
+                # Calculate RMS for logging
                 rms = np.sqrt(np.mean(audio**2))
 
-                # Simple VAD
-                is_speech = rms > self.config.vad_threshold if self.config.vad_enabled else True
+                # Voice Activity Detection
+                if self.config.vad_enabled:
+                    if self._vad is not None:
+                        # Use neural VAD (Silero or similar)
+                        is_speech, confidence = self._vad.is_speech(audio, self.config.sample_rate)
+                    else:
+                        # Fallback to simple RMS VAD
+                        is_speech = rms > self.config.vad_threshold
+                        confidence = min(rms / (self.config.vad_threshold * 5), 1.0) if is_speech else 0.0
+                else:
+                    is_speech = True
+                    confidence = 1.0
 
                 chunk = AudioChunk(
                     data=audio.copy(),

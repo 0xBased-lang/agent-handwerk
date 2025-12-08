@@ -9,13 +9,18 @@ German healthcare-specific compliance including:
 """
 from __future__ import annotations
 
+import asyncio
+import logging
 from dataclasses import dataclass, field
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from enum import Enum
 from typing import Any, Callable
 from uuid import UUID, uuid4
 import hashlib
 import json
+from collections import deque
+
+logger = logging.getLogger(__name__)
 
 
 class ConsentType(str, Enum):
@@ -543,6 +548,164 @@ class AuditLogger:
         return "\n".join(lines)
 
 
+class PersistentAuditLogger(AuditLogger):
+    """Audit logger with database persistence for DSGVO compliance.
+
+    Extends AuditLogger with:
+    - Background async persistence to database
+    - Automatic retry on failure
+    - In-memory buffer for fast access
+    - Guaranteed delivery (queue survives brief failures)
+
+    Usage:
+        logger = PersistentAuditLogger()
+        await logger.start_persistence()  # Start background task
+        logger.log(...)  # Logs persist automatically
+        await logger.stop_persistence()  # Graceful shutdown
+    """
+
+    def __init__(self, max_buffer_size: int = 1000, flush_interval: float = 1.0):
+        """Initialize persistent audit logger.
+
+        Args:
+            max_buffer_size: Max entries to buffer before forcing flush
+            flush_interval: Seconds between persistence attempts
+        """
+        super().__init__()
+        self._pending_queue: deque[AuditLogEntry] = deque(maxlen=max_buffer_size)
+        self._flush_interval = flush_interval
+        self._running = False
+        self._persistence_task: asyncio.Task | None = None
+        self._last_checksum: str | None = None
+
+    def log(
+        self,
+        action: AuditAction,
+        actor_id: str,
+        actor_type: str,
+        resource_type: str,
+        resource_id: str | None = None,
+        patient_id: UUID | None = None,
+        details: dict[str, Any] | None = None,
+        ip_address: str | None = None,
+        session_id: str | None = None,
+    ) -> AuditLogEntry:
+        """Log action and queue for persistence.
+
+        Immediately stores in memory and queues for database persistence.
+        """
+        entry = super().log(
+            action=action,
+            actor_id=actor_id,
+            actor_type=actor_type,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            patient_id=patient_id,
+            details=details,
+            ip_address=ip_address,
+            session_id=session_id,
+        )
+
+        # Queue for database persistence
+        self._pending_queue.append(entry)
+
+        return entry
+
+    async def start_persistence(self) -> None:
+        """Start background persistence task."""
+        if self._running:
+            return
+
+        self._running = True
+        self._persistence_task = asyncio.create_task(self._persistence_loop())
+        logger.info("Audit log persistence started")
+
+    async def stop_persistence(self) -> None:
+        """Stop persistence and flush remaining logs."""
+        self._running = False
+
+        if self._persistence_task:
+            self._persistence_task.cancel()
+            try:
+                await self._persistence_task
+            except asyncio.CancelledError:
+                pass
+
+        # Final flush
+        await self._flush_to_database()
+        logger.info("Audit log persistence stopped")
+
+    async def _persistence_loop(self) -> None:
+        """Background loop that persists logs to database."""
+        while self._running:
+            try:
+                await self._flush_to_database()
+                await asyncio.sleep(self._flush_interval)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Audit persistence error: {e}")
+                await asyncio.sleep(self._flush_interval * 2)  # Back off on error
+
+    async def _flush_to_database(self) -> None:
+        """Flush pending entries to database."""
+        if not self._pending_queue:
+            return
+
+        try:
+            from phone_agent.db.session import get_db_context
+            from phone_agent.db.repositories.compliance import AuditLogRepository
+            from phone_agent.db.models.compliance import AuditLogModel
+
+            async with get_db_context() as session:
+                repo = AuditLogRepository(session)
+
+                # Get last checksum for chain integrity
+                if self._last_checksum is None:
+                    self._last_checksum = await repo.get_last_checksum()
+
+                persisted_count = 0
+                while self._pending_queue:
+                    entry = self._pending_queue[0]  # Peek
+
+                    # Convert AuditLogEntry to AuditLogModel
+                    db_entry = AuditLogModel.create(
+                        action=entry.action.value,
+                        actor_id=entry.actor_id,
+                        actor_type=entry.actor_type,
+                        resource_type=entry.resource_type,
+                        resource_id=entry.resource_id,
+                        contact_id=entry.patient_id,  # Map patient_id to contact_id
+                        details=entry.details,
+                        ip_address=entry.ip_address,
+                        session_id=entry.session_id,
+                        industry="gesundheit",
+                        previous_checksum=self._last_checksum,
+                    )
+
+                    await repo.create(db_entry)
+                    self._last_checksum = db_entry.checksum
+
+                    self._pending_queue.popleft()  # Remove after successful persist
+                    persisted_count += 1
+
+                if persisted_count > 0:
+                    logger.debug(f"Persisted {persisted_count} audit entries to database")
+
+        except Exception as e:
+            logger.error(f"Failed to flush audit logs: {e}")
+            # Don't clear queue on failure - will retry
+
+    @property
+    def pending_count(self) -> int:
+        """Get count of entries pending persistence."""
+        return len(self._pending_queue)
+
+    async def force_flush(self) -> None:
+        """Force immediate persistence of all pending entries."""
+        await self._flush_to_database()
+
+
 class DataProtectionService:
     """DSGVO/GDPR data protection service."""
 
@@ -656,7 +819,7 @@ class DataProtectionService:
 
 # Singleton instances
 _consent_manager: ConsentManager | None = None
-_audit_logger: AuditLogger | None = None
+_audit_logger: PersistentAuditLogger | None = None
 _data_protection_service: DataProtectionService | None = None
 
 
@@ -668,11 +831,15 @@ def get_consent_manager() -> ConsentManager:
     return _consent_manager
 
 
-def get_audit_logger() -> AuditLogger:
-    """Get or create audit logger singleton."""
+def get_audit_logger() -> PersistentAuditLogger:
+    """Get or create audit logger singleton.
+
+    Returns PersistentAuditLogger with database persistence.
+    Call start_audit_persistence() during app startup.
+    """
     global _audit_logger
     if _audit_logger is None:
-        _audit_logger = AuditLogger()
+        _audit_logger = PersistentAuditLogger()
     return _audit_logger
 
 
@@ -682,3 +849,24 @@ def get_data_protection_service() -> DataProtectionService:
     if _data_protection_service is None:
         _data_protection_service = DataProtectionService()
     return _data_protection_service
+
+
+async def start_audit_persistence() -> None:
+    """Start audit log persistence background task.
+
+    Call this during application startup (e.g., in FastAPI lifespan).
+    """
+    audit_logger = get_audit_logger()
+    await audit_logger.start_persistence()
+    logger.info("DSGVO audit persistence initialized")
+
+
+async def stop_audit_persistence() -> None:
+    """Stop audit log persistence and flush remaining logs.
+
+    Call this during application shutdown.
+    """
+    global _audit_logger
+    if _audit_logger is not None:
+        await _audit_logger.stop_persistence()
+        logger.info(f"DSGVO audit persistence stopped (pending: {_audit_logger.pending_count})")

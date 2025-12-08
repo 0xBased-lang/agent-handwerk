@@ -10,16 +10,23 @@ Manages the full conversation flow for the phone agent, including:
 from __future__ import annotations
 
 import asyncio
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, Callable, Awaitable
 from uuid import UUID, uuid4
 
 import numpy as np
 from itf_shared import get_logger
 
-from phone_agent.ai import SpeechToText, LanguageModel, TextToSpeech
+from phone_agent.ai import (
+    SpeechToText,
+    DialectAwareSTT,
+    DialectResult,
+    LanguageModel,
+    TextToSpeech,
+)
 from phone_agent.config import get_settings
 from phone_agent.industry.gesundheit import (
     SYSTEM_PROMPT,
@@ -28,6 +35,34 @@ from phone_agent.industry.gesundheit import (
 )
 
 log = get_logger(__name__)
+
+
+# Sentence boundary pattern for German text
+# Matches: period, exclamation, question mark followed by space or end
+SENTENCE_END_PATTERN = re.compile(r'([.!?])(?:\s+|$)')
+
+
+def extract_complete_sentence(buffer: str) -> tuple[str | None, str]:
+    """Extract the first complete sentence from a buffer.
+
+    Args:
+        buffer: Text buffer that may contain partial sentences
+
+    Returns:
+        Tuple of (complete_sentence or None, remaining_buffer)
+    """
+    match = SENTENCE_END_PATTERN.search(buffer)
+    if match:
+        # Found a sentence boundary
+        end_pos = match.end()
+        sentence = buffer[:end_pos].strip()
+        remaining = buffer[end_pos:].lstrip()
+
+        # Filter out very short "sentences" (likely noise)
+        if len(sentence) >= 5:
+            return sentence, remaining
+
+    return None, buffer
 
 
 class TurnRole(str, Enum):
@@ -62,6 +97,11 @@ class ConversationState:
     appointment_id: UUID | None = None
     started_at: datetime = field(default_factory=datetime.now)
     ended_at: datetime | None = None
+
+    # Dialect tracking for German regional variants
+    detected_dialect: str | None = None  # de_standard, de_alemannic, de_bavarian, etc.
+    dialect_confidence: float = 0.0
+    dialect_features: list[str] = field(default_factory=list)
 
     def add_turn(self, role: TurnRole, content: str, **kwargs: Any) -> ConversationTurn:
         """Add a turn to the conversation."""
@@ -98,10 +138,11 @@ class ConversationEngine:
 
     def __init__(
         self,
-        stt: SpeechToText | None = None,
+        stt: SpeechToText | DialectAwareSTT | None = None,
         llm: LanguageModel | None = None,
         tts: TextToSpeech | None = None,
         system_prompt: str | None = None,
+        dialect_aware: bool = True,
     ) -> None:
         """Initialize conversation engine.
 
@@ -110,17 +151,31 @@ class ConversationEngine:
             llm: Language model engine (created if None)
             tts: Text-to-speech engine (created if None)
             system_prompt: Custom system prompt (uses healthcare default if None)
+            dialect_aware: Use dialect-aware STT for German variants (Schwäbisch, etc.)
         """
         settings = get_settings()
 
         # Initialize AI components (lazy loaded)
-        self.stt = stt or SpeechToText(
-            model=settings.ai.stt.model,
-            model_path=settings.ai.stt.model_path,
-            device=settings.ai.stt.device,
-            compute_type=settings.ai.stt.compute_type,
-            language=settings.ai.stt.language,
-        )
+        # Use DialectAwareSTT for German dialect support (Schwäbisch, Bavarian, etc.)
+        if stt is not None:
+            self.stt = stt
+        elif dialect_aware:
+            self.stt = DialectAwareSTT(
+                model_path=settings.ai.stt.model_path,
+                device=settings.ai.stt.device,
+                compute_type=settings.ai.stt.compute_type,
+                dialect_detection=True,
+                detection_mode="text",  # Post-transcription detection (faster)
+            )
+        else:
+            self.stt = SpeechToText(
+                model=settings.ai.stt.model,
+                model_path=settings.ai.stt.model_path,
+                device=settings.ai.stt.device,
+                compute_type=settings.ai.stt.compute_type,
+                language=settings.ai.stt.language,
+            )
+
         self.llm = llm or LanguageModel(
             model=settings.ai.llm.model,
             model_path=settings.ai.llm.model_path,
@@ -135,6 +190,7 @@ class ConversationEngine:
 
         self.system_prompt = system_prompt or SYSTEM_PROMPT
         self._conversations: dict[UUID, ConversationState] = {}
+        self._dialect_aware = dialect_aware
 
     def preload_models(self) -> None:
         """Preload all AI models into memory.
@@ -186,6 +242,56 @@ class ConversationEngine:
             )
         return state
 
+    def _build_system_prompt_with_dialect(self, state: ConversationState) -> str:
+        """Build system prompt with dialect context if detected.
+
+        Args:
+            state: Conversation state with dialect info
+
+        Returns:
+            System prompt with dialect context if applicable
+        """
+        if not state.detected_dialect or state.detected_dialect == "de_standard":
+            return self.system_prompt
+
+        # Map dialect codes to friendly names
+        dialect_names = {
+            "de_alemannic": "Schwäbisch/Alemannisch",
+            "de_bavarian": "Bayerisch",
+            "de_low": "Plattdeutsch",
+        }
+        dialect_name = dialect_names.get(state.detected_dialect, "Dialekt")
+
+        dialect_context = f"""
+
+DIALEKT-HINWEIS:
+Der Anrufer spricht {dialect_name}.
+- Verstehe dialektale Ausdrücke (z.B. "bissle", "net", "schaffe")
+- Antworte selbst in klarem Hochdeutsch (Sie-Form)
+- Sei geduldig, da Dialektsprecher manchmal anders formulieren"""
+
+        return self.system_prompt + dialect_context
+
+    def _update_dialect_from_stt(self, state: ConversationState) -> None:
+        """Update conversation state with detected dialect.
+
+        Args:
+            state: Conversation state to update
+        """
+        if not self._dialect_aware or not hasattr(self.stt, "_last_dialect"):
+            return
+
+        dialect = getattr(self.stt, "_last_dialect", None)
+        if dialect and dialect.confidence > state.dialect_confidence:
+            state.detected_dialect = dialect.dialect
+            state.dialect_confidence = dialect.confidence
+            state.dialect_features = getattr(dialect, "features_detected", [])
+            log.info(
+                "Dialect detected",
+                dialect=dialect.dialect,
+                confidence=round(dialect.confidence, 2),
+            )
+
     async def process_audio(
         self,
         audio: np.ndarray,
@@ -211,10 +317,15 @@ class ConversationEngine:
         # STT: Audio → Text
         log.debug("Starting STT", audio_length=len(audio) / sample_rate)
         user_text = await self.stt.transcribe_async(audio, sample_rate)
+
+        # Update dialect detection from STT (if using DialectAwareSTT)
+        self._update_dialect_from_stt(state)
+
         state.add_turn(
             TurnRole.USER,
             user_text,
             audio_duration=len(audio) / sample_rate,
+            metadata={"dialect": state.detected_dialect},
         )
         log.info("User said", text=user_text[:100])
 
@@ -228,12 +339,19 @@ class ConversationEngine:
                 reason=triage_result.reason,
             )
 
-        # LLM: Generate response
-        log.debug("Starting LLM generation")
-        response_text = await self.llm.generate_async(
-            prompt=user_text,
-            system_prompt=self.system_prompt,
+        # LLM: Generate response with conversation history
+        log.debug(
+            "Starting LLM generation",
+            history_turns=len(state.turns),
+            dialect=state.detected_dialect,
         )
+
+        # Build messages with dialect-aware system prompt
+        effective_prompt = self._build_system_prompt_with_dialect(state)
+        messages = [{"role": "system", "content": effective_prompt}]
+        messages.extend(state.get_history_for_llm(max_turns=10))
+
+        response_text = await self.llm.generate_with_history_async(messages)
         state.add_turn(TurnRole.ASSISTANT, response_text, triage_result=triage_result)
         log.info("Assistant response", text=response_text[:100])
 
@@ -268,11 +386,12 @@ class ConversationEngine:
         if triage_result.level.value in ("akut", "dringend"):
             state.triage_result = triage_result
 
-        # Generate response
-        response_text = await self.llm.generate_async(
-            prompt=text,
-            system_prompt=self.system_prompt,
-        )
+        # Generate response with dialect-aware conversation history
+        effective_prompt = self._build_system_prompt_with_dialect(state)
+        messages = [{"role": "system", "content": effective_prompt}]
+        messages.extend(state.get_history_for_llm(max_turns=10))
+
+        response_text = await self.llm.generate_with_history_async(messages)
         state.add_turn(TurnRole.ASSISTANT, response_text, triage_result=triage_result)
 
         return response_text
@@ -323,16 +442,197 @@ class ConversationEngine:
 
         state.add_turn(TurnRole.USER, text)
 
-        # Stream from LLM
+        # Build messages with dialect-aware conversation history
+        effective_prompt = self._build_system_prompt_with_dialect(state)
+        messages = [{"role": "system", "content": effective_prompt}]
+        messages.extend(state.get_history_for_llm(max_turns=10))
+
+        # Stream from LLM with history
         full_response = ""
-        for token in self.llm.generate_stream(
-            prompt=text,
-            system_prompt=self.system_prompt,
-        ):
+        for token in self.llm.generate_stream_with_history(messages):
             full_response += token
             yield token
 
         state.add_turn(TurnRole.ASSISTANT, full_response)
+
+    async def process_audio_streaming(
+        self,
+        audio: np.ndarray,
+        conversation_id: UUID,
+        on_sentence_ready: Callable[[str, bytes], Awaitable[None]],
+        sample_rate: int = 16000,
+    ) -> tuple[str, str, bytes]:
+        """Process audio with streaming TTS - speak as soon as first sentence is ready.
+
+        This method significantly reduces perceived latency by starting TTS playback
+        as soon as the first complete sentence is generated, while the LLM continues
+        generating the rest of the response.
+
+        Args:
+            audio: Audio waveform as numpy array
+            conversation_id: Active conversation ID
+            on_sentence_ready: Async callback called with (sentence_text, audio_bytes)
+                              for each complete sentence. Should play audio immediately.
+            sample_rate: Audio sample rate (default 16kHz)
+
+        Returns:
+            Tuple of (user_text, full_response_text, full_response_audio)
+        """
+        import time
+
+        state = self._conversations.get(conversation_id)
+        if not state:
+            raise ValueError(f"Unknown conversation: {conversation_id}")
+
+        start_time = time.time()
+
+        # === STT Phase ===
+        log.debug("Streaming: Starting STT", audio_length=len(audio) / sample_rate)
+        user_text = await self.stt.transcribe_async(audio, sample_rate)
+
+        # Update dialect detection
+        self._update_dialect_from_stt(state)
+
+        state.add_turn(
+            TurnRole.USER,
+            user_text,
+            audio_duration=len(audio) / sample_rate,
+            metadata={"dialect": state.detected_dialect},
+        )
+        stt_time = time.time() - start_time
+        log.info("Streaming: User said", text=user_text[:100], stt_time=f"{stt_time:.2f}s")
+
+        # === Triage (quick check for emergencies) ===
+        triage_result = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: perform_triage(user_text),
+        )
+
+        # === LLM + TTS Streaming Phase ===
+        effective_prompt = self._build_system_prompt_with_dialect(state)
+        messages = [{"role": "system", "content": effective_prompt}]
+        messages.extend(state.get_history_for_llm(max_turns=10))
+
+        buffer = ""
+        full_response = ""
+        all_audio_chunks: list[bytes] = []
+        sentences_spoken = 0
+        first_sentence_time = None
+
+        log.debug("Streaming: Starting LLM generation")
+
+        for token in self.llm.generate_stream_with_history(messages):
+            buffer += token
+            full_response += token
+
+            # Try to extract complete sentences
+            while True:
+                sentence, buffer = extract_complete_sentence(buffer)
+                if sentence is None:
+                    break
+
+                # Synthesize and play this sentence immediately
+                if sentences_spoken == 0:
+                    first_sentence_time = time.time() - start_time
+                    log.info(
+                        "Streaming: First sentence ready",
+                        time=f"{first_sentence_time:.2f}s",
+                        sentence=sentence[:50],
+                    )
+
+                audio_chunk = await self.tts.synthesize_async(sentence)
+                all_audio_chunks.append(audio_chunk)
+
+                # Call the callback to play audio immediately
+                await on_sentence_ready(sentence, audio_chunk)
+                sentences_spoken += 1
+
+        # Handle any remaining text in buffer
+        if buffer.strip() and len(buffer.strip()) >= 3:
+            audio_chunk = await self.tts.synthesize_async(buffer.strip())
+            all_audio_chunks.append(audio_chunk)
+            await on_sentence_ready(buffer.strip(), audio_chunk)
+
+        # Combine all audio chunks for the full response
+        full_audio = b"".join(all_audio_chunks)
+
+        state.add_turn(TurnRole.ASSISTANT, full_response, triage_result=triage_result)
+
+        total_time = time.time() - start_time
+        log.info(
+            "Streaming: Complete",
+            total_time=f"{total_time:.2f}s",
+            first_sentence_time=f"{first_sentence_time:.2f}s" if first_sentence_time else "N/A",
+            sentences=sentences_spoken,
+        )
+
+        return user_text, full_response, full_audio
+
+    async def process_text_streaming(
+        self,
+        text: str,
+        conversation_id: UUID,
+        on_sentence_ready: Callable[[str, bytes], Awaitable[None]],
+    ) -> tuple[str, bytes]:
+        """Process text input with streaming TTS output.
+
+        Args:
+            text: User text input
+            conversation_id: Active conversation ID
+            on_sentence_ready: Async callback for each sentence
+
+        Returns:
+            Tuple of (full_response_text, full_response_audio)
+        """
+        import time
+
+        state = self._conversations.get(conversation_id)
+        if not state:
+            raise ValueError(f"Unknown conversation: {conversation_id}")
+
+        start_time = time.time()
+        state.add_turn(TurnRole.USER, text)
+
+        # Build messages with history
+        effective_prompt = self._build_system_prompt_with_dialect(state)
+        messages = [{"role": "system", "content": effective_prompt}]
+        messages.extend(state.get_history_for_llm(max_turns=10))
+
+        buffer = ""
+        full_response = ""
+        all_audio_chunks: list[bytes] = []
+        sentences_spoken = 0
+
+        for token in self.llm.generate_stream_with_history(messages):
+            buffer += token
+            full_response += token
+
+            while True:
+                sentence, buffer = extract_complete_sentence(buffer)
+                if sentence is None:
+                    break
+
+                audio_chunk = await self.tts.synthesize_async(sentence)
+                all_audio_chunks.append(audio_chunk)
+                await on_sentence_ready(sentence, audio_chunk)
+                sentences_spoken += 1
+
+        # Handle remaining buffer
+        if buffer.strip() and len(buffer.strip()) >= 3:
+            audio_chunk = await self.tts.synthesize_async(buffer.strip())
+            all_audio_chunks.append(audio_chunk)
+            await on_sentence_ready(buffer.strip(), audio_chunk)
+
+        full_audio = b"".join(all_audio_chunks)
+        state.add_turn(TurnRole.ASSISTANT, full_response)
+
+        log.debug(
+            "Text streaming complete",
+            time=f"{time.time() - start_time:.2f}s",
+            sentences=sentences_spoken,
+        )
+
+        return full_response, full_audio
 
     def get_conversation(self, conversation_id: UUID) -> ConversationState | None:
         """Get conversation state by ID."""

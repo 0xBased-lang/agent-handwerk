@@ -1,8 +1,15 @@
 """Core business logic for phone agent."""
 
-from phone_agent.core.audio import AudioPipeline
+from phone_agent.core.audio import AudioPipeline, AudioConfig
 from phone_agent.core.conversation import ConversationEngine
 from phone_agent.core.call_handler import CallHandler, CallState
+from phone_agent.core.metrics import (
+    LatencyMetrics,
+    ComponentMetrics,
+    TurnMetrics,
+    get_metrics,
+    reset_metrics,
+)
 from phone_agent.core.exceptions import (
     PhoneAgentError,
     DatabaseError,
@@ -24,13 +31,35 @@ from phone_agent.core.exceptions import (
     AuthError,
     InvalidSignatureError,
 )
+from phone_agent.core.retry import (
+    retry,
+    retry_async,
+    RetryConfig,
+    RetryExhausted,
+    CircuitBreaker,
+    CircuitOpen,
+    CircuitState,
+    get_circuit_breaker,
+    get_circuit_breaker_status,
+    reset_circuit_breaker,
+    API_RETRY_CONFIG,
+    AI_MODEL_RETRY_CONFIG,
+    DATABASE_RETRY_CONFIG,
+)
 
 __all__ = [
     # Core components
     "AudioPipeline",
+    "AudioConfig",
     "ConversationEngine",
     "CallHandler",
     "CallState",
+    # Metrics
+    "LatencyMetrics",
+    "ComponentMetrics",
+    "TurnMetrics",
+    "get_metrics",
+    "reset_metrics",
     # Exceptions
     "PhoneAgentError",
     "DatabaseError",
@@ -51,4 +80,18 @@ __all__ = [
     "AppointmentConflictError",
     "AuthError",
     "InvalidSignatureError",
+    # Retry utilities
+    "retry",
+    "retry_async",
+    "RetryConfig",
+    "RetryExhausted",
+    "CircuitBreaker",
+    "CircuitOpen",
+    "CircuitState",
+    "get_circuit_breaker",
+    "get_circuit_breaker_status",
+    "reset_circuit_breaker",
+    "API_RETRY_CONFIG",
+    "AI_MODEL_RETRY_CONFIG",
+    "DATABASE_RETRY_CONFIG",
 ]

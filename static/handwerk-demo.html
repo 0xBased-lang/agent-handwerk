@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Handwerker Demo - IT-Friends Phone Agent</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#2563eb',
+                        secondary: '#64748b',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @keyframes pulse-ring {
+            0% { transform: scale(0.8); opacity: 0.8; }
+            50% { transform: scale(1.2); opacity: 0.4; }
+            100% { transform: scale(0.8); opacity: 0.8; }
+        }
+        .recording .pulse-ring {
+            animation: pulse-ring 1.5s ease-in-out infinite;
+        }
+        .message-enter {
+            animation: slideIn 0.3s ease-out;
+        }
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .status-badge {
+            font-size: 0.7rem;
+            padding: 2px 8px;
+            border-radius: 9999px;
+        }
+        .urgency-notfall { background: #fee2e2; color: #dc2626; }
+        .urgency-dringend { background: #fef3c7; color: #d97706; }
+        .urgency-normal { background: #dbeafe; color: #2563eb; }
+        .urgency-routine { background: #d1fae5; color: #059669; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="min-h-screen flex flex-col">
+        <!-- Header -->
+        <header class="bg-white border-b shadow-sm">
+            <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <span class="text-3xl">🔧</span>
+                    <div>
+                        <h1 class="text-xl font-bold text-gray-800">Handwerker Telefonassistent</h1>
+                        <p class="text-sm text-gray-500">IT-Friends Demo</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-4">
+                    <div id="connectionStatus" class="px-3 py-1 rounded-full text-sm bg-gray-200 text-gray-600">
+                        ○ Getrennt
+                    </div>
+                    <button onclick="refreshData()" class="p-2 hover:bg-gray-100 rounded-lg" title="Aktualisieren">
+                        🔄
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="flex-1 max-w-7xl mx-auto w-full p-4">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+                <!-- Left Column: Voice Interface -->
+                <div class="lg:col-span-1 space-y-6">
+                    <!-- Voice Panel -->
+                    <div class="bg-white rounded-2xl shadow-lg p-6">
+                        <h2 class="text-lg font-semibold text-gray-700 mb-4 flex items-center gap-2">
+                            <span>🎤</span> Sprachassistent
+                        </h2>
+                        <div class="flex flex-col items-center">
+                            <button id="micButton" onclick="toggleRecording()"
+                                class="relative w-24 h-24 rounded-full bg-gray-100 hover:bg-gray-200
+                                       transition-all duration-200 flex items-center justify-center
+                                       focus:outline-none focus:ring-4 focus:ring-blue-300 mb-4">
+                                <div class="pulse-ring absolute inset-0 rounded-full bg-red-400 opacity-0"></div>
+                                <span id="micIcon" class="text-4xl">🎤</span>
+                            </button>
+                            <p id="micStatus" class="text-sm text-gray-500">Klicken zum Aufnehmen</p>
+                        </div>
+
+                        <!-- Conversation -->
+                        <div id="conversation" class="mt-4 h-64 overflow-y-auto space-y-3 p-2 bg-gray-50 rounded-lg">
+                            <p class="text-center text-gray-400 text-sm italic">
+                                Gespräch beginnt hier...
+                            </p>
+                        </div>
+
+                        <!-- Quick Phrases -->
+                        <div class="mt-4 space-y-2">
+                            <p class="text-xs text-gray-500 font-medium">Schnellanfragen:</p>
+                            <button onclick="sendText('Ich brauche einen Termin für Heizungswartung')"
+                                class="w-full text-left px-3 py-2 bg-gray-50 rounded-lg hover:bg-gray-100
+                                       text-sm text-gray-700 transition">
+                                📅 "Heizungswartung Termin"
+                            </button>
+                            <button onclick="sendText('Es riecht nach Gas in meiner Wohnung')"
+                                class="w-full text-left px-3 py-2 bg-red-50 rounded-lg hover:bg-red-100
+                                       text-sm text-red-700 transition border border-red-200">
+                                ⚠️ "Gasgeruch - Notfall"
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Stats -->
+                    <div class="bg-white rounded-2xl shadow-lg p-6">
+                        <h2 class="text-lg font-semibold text-gray-700 mb-4">📊 Statistiken</h2>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="text-center p-3 bg-gray-50 rounded-lg">
+                                <div id="statToday" class="text-2xl font-bold text-blue-600">0</div>
+                                <div class="text-xs text-gray-500">Heute</div>
+                            </div>
+                            <div class="text-center p-3 bg-gray-50 rounded-lg">
+                                <div id="statWeek" class="text-2xl font-bold text-green-600">0</div>
+                                <div class="text-xs text-gray-500">Diese Woche</div>
+                            </div>
+                            <div class="text-center p-3 bg-gray-50 rounded-lg">
+                                <div id="statOpen" class="text-2xl font-bold text-orange-600">0</div>
+                                <div class="text-xs text-gray-500">Offen</div>
+                            </div>
+                            <div class="text-center p-3 bg-gray-50 rounded-lg">
+                                <div id="statTotal" class="text-2xl font-bold text-gray-600">0</div>
+                                <div class="text-xs text-gray-500">Gesamt</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Middle Column: Calendar -->
+                <div class="lg:col-span-1">
+                    <div class="bg-white rounded-2xl shadow-lg p-6 h-full">
+                        <div class="flex items-center justify-between mb-4">
+                            <h2 class="text-lg font-semibold text-gray-700 flex items-center gap-2">
+                                <span>📅</span> Kalender
+                            </h2>
+                            <div class="flex gap-2">
+                                <button onclick="changeDate(-1)" class="p-1 hover:bg-gray-100 rounded">◀</button>
+                                <span id="currentDate" class="text-sm font-medium"></span>
+                                <button onclick="changeDate(1)" class="p-1 hover:bg-gray-100 rounded">▶</button>
+                            </div>
+                        </div>
+
+                        <!-- Time slots -->
+                        <div id="calendarSlots" class="space-y-2 max-h-[500px] overflow-y-auto">
+                            <div class="text-center text-gray-400 text-sm py-8">
+                                Lade Kalender...
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right Column: Jobs -->
+                <div class="lg:col-span-1">
+                    <div class="bg-white rounded-2xl shadow-lg p-6 h-full">
+                        <div class="flex items-center justify-between mb-4">
+                            <h2 class="text-lg font-semibold text-gray-700 flex items-center gap-2">
+                                <span>📋</span> Aufträge
+                            </h2>
+                            <button onclick="showNewJobModal()"
+                                class="px-3 py-1 bg-blue-500 text-white rounded-lg text-sm hover:bg-blue-600">
+                                + Neu
+                            </button>
+                        </div>
+
+                        <!-- Filter tabs -->
+                        <div class="flex gap-2 mb-4 text-sm">
+                            <button onclick="filterJobs('all')" id="filterAll"
+                                class="px-3 py-1 bg-blue-100 text-blue-700 rounded-full">Alle</button>
+                            <button onclick="filterJobs('requested')" id="filterRequested"
+                                class="px-3 py-1 hover:bg-gray-100 rounded-full">Offen</button>
+                            <button onclick="filterJobs('notfall')" id="filterNotfall"
+                                class="px-3 py-1 hover:bg-gray-100 rounded-full text-red-600">🚨</button>
+                        </div>
+
+                        <!-- Jobs list -->
+                        <div id="jobsList" class="space-y-3 max-h-[450px] overflow-y-auto">
+                            <div class="text-center text-gray-400 text-sm py-8">
+                                Lade Aufträge...
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <footer class="bg-white border-t py-4 mt-6">
+            <div class="max-w-7xl mx-auto px-4 text-center text-sm text-gray-500">
+                IT-Friends GmbH &copy; 2024 | Phone Agent Demo v0.1
+            </div>
+        </footer>
+    </div>
+
+    <!-- New Job Modal -->
+    <div id="newJobModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+        <div class="bg-white rounded-2xl p-6 max-w-md w-full mx-4">
+            <h3 class="text-lg font-semibold mb-4">Neuer Auftrag</h3>
+            <form id="newJobForm" onsubmit="createJob(event)">
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Titel *</label>
+                        <input type="text" name="title" required
+                            class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-300"
+                            placeholder="z.B. Heizung defekt">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Beschreibung</label>
+                        <textarea name="description" rows="2"
+                            class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-300"
+                            placeholder="Details zum Problem..."></textarea>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Kategorie</label>
+                            <select name="trade_category"
+                                class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-300">
+                                <option value="shk">SHK (Sanitär/Heizung)</option>
+                                <option value="elektro">Elektro</option>
+                                <option value="schlosser">Schlüsseldienst</option>
+                                <option value="allgemein">Allgemein</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Dringlichkeit</label>
+                            <select name="urgency"
+                                class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-300">
+                                <option value="normal">Normal</option>
+                                <option value="dringend">Dringend</option>
+                                <option value="notfall">Notfall</option>
+                                <option value="routine">Routine</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Adresse</label>
+                        <input type="text" name="address_street"
+                            class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-300"
+                            placeholder="Straße und Hausnummer">
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <input type="text" name="address_zip"
+                            class="px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-300"
+                            placeholder="PLZ">
+                        <input type="text" name="address_city"
+                            class="px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-300"
+                            placeholder="Stadt">
+                    </div>
+                </div>
+                <div class="flex justify-end gap-3 mt-6">
+                    <button type="button" onclick="hideNewJobModal()"
+                        class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">Abbrechen</button>
+                    <button type="submit"
+                        class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">Erstellen</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // API Base URL
+        const API_BASE = '/api/v1/handwerk';
+
+        // State
+        let currentDate = new Date();
+        let currentFilter = 'all';
+        let ws = null;
+        let isRecording = false;
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            updateDateDisplay();
+            loadDashboard();
+            loadCalendar();
+            loadJobs();
+        });
+
+        // Date handling
+        function updateDateDisplay() {
+            const options = { weekday: 'short', day: 'numeric', month: 'short' };
+            document.getElementById('currentDate').textContent =
+                currentDate.toLocaleDateString('de-DE', options);
+        }
+
+        function changeDate(delta) {
+            currentDate.setDate(currentDate.getDate() + delta);
+            updateDateDisplay();
+            loadCalendar();
+        }
+
+        // Load dashboard stats
+        async function loadDashboard() {
+            try {
+                const response = await fetch(`${API_BASE}/dashboard/stats`);
+                const data = await response.json();
+
+                document.getElementById('statToday').textContent = data.jobs?.today || 0;
+                document.getElementById('statWeek').textContent = data.jobs?.this_week || 0;
+                document.getElementById('statTotal').textContent = data.jobs?.total || 0;
+
+                const openCount = (data.jobs?.by_status?.requested || 0) +
+                    (data.jobs?.by_status?.quoted || 0);
+                document.getElementById('statOpen').textContent = openCount;
+            } catch (error) {
+                console.error('Failed to load dashboard:', error);
+            }
+        }
+
+        // Load calendar
+        async function loadCalendar() {
+            const dateStr = currentDate.toISOString().split('T')[0];
+            const container = document.getElementById('calendarSlots');
+
+            try {
+                const response = await fetch(`${API_BASE}/calendar/${dateStr}`);
+                const data = await response.json();
+
+                if (data.schedule.length === 0) {
+                    container.innerHTML = `
+                        <div class="text-center text-gray-400 py-8">
+                            <p>Keine Termine für diesen Tag</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                container.innerHTML = data.schedule.map(job => `
+                    <div class="p-3 border rounded-lg hover:shadow-md transition cursor-pointer"
+                         onclick="showJobDetails('${job.id}')">
+                        <div class="flex justify-between items-start mb-1">
+                            <span class="font-medium text-sm">${job.time || 'TBD'}</span>
+                            <span class="status-badge urgency-${job.urgency}">${job.urgency}</span>
+                        </div>
+                        <p class="text-sm font-medium text-gray-800">${job.title}</p>
+                        ${job.customer?.name ? `<p class="text-xs text-gray-500">${job.customer.name}</p>` : ''}
+                        ${job.address?.city ? `<p class="text-xs text-gray-400">${job.address.city}</p>` : ''}
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Failed to load calendar:', error);
+                container.innerHTML = `<div class="text-center text-red-500 py-4">Fehler beim Laden</div>`;
+            }
+        }
+
+        // Load jobs
+        async function loadJobs() {
+            const container = document.getElementById('jobsList');
+
+            try {
+                let url = `${API_BASE}/jobs?limit=20`;
+                if (currentFilter === 'requested') {
+                    url += '&status=requested';
+                } else if (currentFilter === 'notfall') {
+                    url += '&urgency=notfall';
+                }
+
+                const response = await fetch(url);
+                const data = await response.json();
+
+                if (data.jobs.length === 0) {
+                    container.innerHTML = `
+                        <div class="text-center text-gray-400 py-8">
+                            Keine Aufträge gefunden
+                        </div>
+                    `;
+                    return;
+                }
+
+                container.innerHTML = data.jobs.map(job => `
+                    <div class="p-3 border rounded-lg hover:shadow-md transition cursor-pointer"
+                         onclick="showJobDetails('${job.id}')">
+                        <div class="flex justify-between items-start mb-1">
+                            <span class="text-xs text-gray-500">${job.job_number}</span>
+                            <span class="status-badge urgency-${job.urgency}">${job.urgency}</span>
+                        </div>
+                        <p class="font-medium text-gray-800 text-sm">${job.title}</p>
+                        <div class="flex justify-between items-center mt-2">
+                            <span class="text-xs text-gray-400">${job.trade_category}</span>
+                            <span class="text-xs px-2 py-0.5 bg-gray-100 rounded">${job.status}</span>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Failed to load jobs:', error);
+                container.innerHTML = `<div class="text-center text-red-500 py-4">Fehler beim Laden</div>`;
+            }
+        }
+
+        // Filter jobs
+        function filterJobs(filter) {
+            currentFilter = filter;
+
+            // Update button styles
+            ['All', 'Requested', 'Notfall'].forEach(f => {
+                const btn = document.getElementById('filter' + f);
+                if (btn) {
+                    btn.className = filter === f.toLowerCase() || (f === 'All' && filter === 'all')
+                        ? 'px-3 py-1 bg-blue-100 text-blue-700 rounded-full'
+                        : 'px-3 py-1 hover:bg-gray-100 rounded-full' + (f === 'Notfall' ? ' text-red-600' : '');
+                }
+            });
+
+            loadJobs();
+        }
+
+        // Show job details
+        function showJobDetails(jobId) {
+            alert('Job Details: ' + jobId + '\n(Detailansicht kommt bald)');
+        }
+
+        // New job modal
+        function showNewJobModal() {
+            document.getElementById('newJobModal').classList.remove('hidden');
+            document.getElementById('newJobModal').classList.add('flex');
+        }
+
+        function hideNewJobModal() {
+            document.getElementById('newJobModal').classList.add('hidden');
+            document.getElementById('newJobModal').classList.remove('flex');
+            document.getElementById('newJobForm').reset();
+        }
+
+        // Create job
+        async function createJob(event) {
+            event.preventDefault();
+            const form = event.target;
+            const formData = new FormData(form);
+
+            const jobData = {
+                title: formData.get('title'),
+                description: formData.get('description') || null,
+                trade_category: formData.get('trade_category'),
+                urgency: formData.get('urgency'),
+                address_street: formData.get('address_street') || null,
+                address_zip: formData.get('address_zip') || null,
+                address_city: formData.get('address_city') || null,
+            };
+
+            try {
+                const response = await fetch(`${API_BASE}/jobs`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(jobData),
+                });
+
+                if (response.ok) {
+                    hideNewJobModal();
+                    loadJobs();
+                    loadDashboard();
+                    alert('Auftrag erstellt!');
+                } else {
+                    const error = await response.json();
+                    alert('Fehler: ' + (error.message || 'Unbekannter Fehler'));
+                }
+            } catch (error) {
+                console.error('Failed to create job:', error);
+                alert('Fehler beim Erstellen des Auftrags');
+            }
+        }
+
+        // Refresh data
+        function refreshData() {
+            loadDashboard();
+            loadCalendar();
+            loadJobs();
+        }
+
+        // Voice interface
+        async function toggleRecording() {
+            if (isRecording) {
+                stopRecording();
+            } else {
+                await startRecording();
+            }
+        }
+
+        async function startRecording() {
+            try {
+                const statusEl = document.getElementById('connectionStatus');
+                statusEl.innerHTML = '◐ Verbinde...';
+                statusEl.className = 'px-3 py-1 rounded-full text-sm bg-yellow-200 text-yellow-700';
+
+                // Connect WebSocket
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                ws = new WebSocket(protocol + '//' + window.location.host + '/demo/handwerk/ws');
+
+                ws.onopen = async () => {
+                    statusEl.innerHTML = '● Verbunden';
+                    statusEl.className = 'px-3 py-1 rounded-full text-sm bg-green-200 text-green-700';
+
+                    isRecording = true;
+                    document.getElementById('micButton').classList.add('recording', 'bg-red-100');
+                    document.getElementById('micIcon').textContent = '🔴';
+                    document.getElementById('micStatus').textContent = 'Aufnahme...';
+
+                    // Get microphone
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                        audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true }
+                    });
+
+                    const audioContext = new AudioContext({ sampleRate: 16000 });
+                    const source = audioContext.createMediaStreamSource(stream);
+                    const processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+                    source.connect(processor);
+                    processor.connect(audioContext.destination);
+
+                    let audioBuffer = new Float32Array(0);
+                    processor.onaudioprocess = (e) => {
+                        if (ws && ws.readyState === WebSocket.OPEN) {
+                            const inputData = e.inputBuffer.getChannelData(0);
+                            const newBuffer = new Float32Array(audioBuffer.length + inputData.length);
+                            newBuffer.set(audioBuffer);
+                            newBuffer.set(inputData, audioBuffer.length);
+                            audioBuffer = newBuffer;
+
+                            if (audioBuffer.length >= 8000) {
+                                const pcmData = new Int16Array(audioBuffer.length);
+                                for (let i = 0; i < audioBuffer.length; i++) {
+                                    pcmData[i] = Math.max(-32768, Math.min(32767, audioBuffer[i] * 32768));
+                                }
+                                ws.send(pcmData.buffer);
+                                audioBuffer = new Float32Array(0);
+                            }
+                        }
+                    };
+
+                    ws._cleanup = () => {
+                        processor.disconnect();
+                        source.disconnect();
+                        audioContext.close();
+                        stream.getTracks().forEach(t => t.stop());
+                    };
+                };
+
+                ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'transcript' && data.text) {
+                        addMessage(data.text, true);
+                    } else if (data.type === 'response' && data.text) {
+                        addMessage(data.text, false);
+                    } else if (data.type === 'audio' && data.data) {
+                        playAudio(data.data);
+                    }
+                };
+
+                ws.onclose = () => {
+                    stopRecording();
+                };
+
+                ws.onerror = () => {
+                    stopRecording();
+                    alert('Verbindungsfehler');
+                };
+
+            } catch (error) {
+                console.error('Recording error:', error);
+                alert('Mikrofon-Zugriff nicht möglich: ' + error.message);
+                stopRecording();
+            }
+        }
+
+        function stopRecording() {
+            isRecording = false;
+
+            if (ws) {
+                if (ws._cleanup) ws._cleanup();
+                ws.close();
+                ws = null;
+            }
+
+            const statusEl = document.getElementById('connectionStatus');
+            statusEl.innerHTML = '○ Getrennt';
+            statusEl.className = 'px-3 py-1 rounded-full text-sm bg-gray-200 text-gray-600';
+
+            document.getElementById('micButton').classList.remove('recording', 'bg-red-100');
+            document.getElementById('micIcon').textContent = '🎤';
+            document.getElementById('micStatus').textContent = 'Klicken zum Aufnehmen';
+        }
+
+        function addMessage(text, isUser) {
+            const container = document.getElementById('conversation');
+            // Remove placeholder
+            const placeholder = container.querySelector('.italic');
+            if (placeholder) placeholder.remove();
+
+            const div = document.createElement('div');
+            div.className = 'message-enter flex ' + (isUser ? 'justify-end' : 'justify-start');
+            div.innerHTML = `
+                <div class="max-w-[85%] rounded-xl px-3 py-2 text-sm ${
+                    isUser ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-800'
+                }">
+                    ${text}
+                </div>
+            `;
+            container.appendChild(div);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function sendText(text) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                alert('Bitte erst Verbindung starten');
+                return;
+            }
+            ws.send(JSON.stringify({ type: 'text', text: text }));
+            addMessage(text, true);
+        }
+
+        let audioQueue = [];
+        let isPlaying = false;
+
+        async function playAudio(base64Audio) {
+            audioQueue.push(base64Audio);
+            if (!isPlaying) playNextAudio();
+        }
+
+        async function playNextAudio() {
+            if (audioQueue.length === 0) {
+                isPlaying = false;
+                return;
+            }
+            isPlaying = true;
+            const base64Audio = audioQueue.shift();
+
+            try {
+                const binaryString = atob(base64Audio);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+
+                const pcmData = new Int16Array(bytes.buffer);
+                const floatData = new Float32Array(pcmData.length);
+                for (let i = 0; i < pcmData.length; i++) {
+                    floatData[i] = pcmData[i] / 32768;
+                }
+
+                const ctx = new AudioContext({ sampleRate: 22050 });
+                const buffer = ctx.createBuffer(1, floatData.length, 22050);
+                buffer.getChannelData(0).set(floatData);
+
+                const source = ctx.createBufferSource();
+                source.buffer = buffer;
+                source.connect(ctx.destination);
+                source.onended = () => { ctx.close(); playNextAudio(); };
+                source.start();
+            } catch (e) {
+                console.error('Audio play error:', e);
+                playNextAudio();
+            }
+        }
+    </script>
+</body>
+</html>

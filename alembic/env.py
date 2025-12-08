@@ -31,6 +31,9 @@ from phone_agent.db.models import (  # noqa: F401 - Register models with Base
     CampaignMetricsModel,
     RecallCampaignModel,
     DashboardSnapshotModel,
+    # Handwerk models
+    JobModel,
+    QuoteModel,
 )
 
 # this is the Alembic Config object, which provides

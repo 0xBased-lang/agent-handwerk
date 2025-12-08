@@ -209,6 +209,100 @@ class LanguageModel:
             lambda: self.generate(prompt, system_prompt, temperature, max_tokens),
         )
 
+    def generate_with_history(
+        self,
+        messages: list[dict[str, str]],
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ) -> str:
+        """Generate response with full conversation history.
+
+        Args:
+            messages: List of {"role": "system|user|assistant", "content": "..."}
+            temperature: Override default temperature
+            max_tokens: Override default max tokens
+
+        Returns:
+            Generated text response
+        """
+        if not self._loaded:
+            self.load()
+
+        temp = temperature if temperature is not None else self.temperature
+        tokens = max_tokens if max_tokens is not None else self.max_tokens
+
+        log.debug(
+            "Generating with history",
+            num_messages=len(messages),
+            temperature=temp,
+            max_tokens=tokens,
+        )
+
+        response = self._llm.create_chat_completion(
+            messages=messages,
+            temperature=temp,
+            max_tokens=tokens,
+        )
+
+        text = response["choices"][0]["message"]["content"]
+
+        log.debug(
+            "Generation complete",
+            response_length=len(text),
+            tokens_used=response.get("usage", {}).get("total_tokens", 0),
+        )
+
+        return text
+
+    async def generate_with_history_async(
+        self,
+        messages: list[dict[str, str]],
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ) -> str:
+        """Async wrapper for generate_with_history."""
+        import asyncio
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: self.generate_with_history(messages, temperature, max_tokens),
+        )
+
+    def generate_stream_with_history(
+        self,
+        messages: list[dict[str, str]],
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ) -> Generator[str, None, None]:
+        """Stream generation with full conversation history.
+
+        Args:
+            messages: List of {"role": "system|user|assistant", "content": "..."}
+            temperature: Override default temperature
+            max_tokens: Override default max tokens
+
+        Yields:
+            Generated text tokens
+        """
+        if not self._loaded:
+            self.load()
+
+        temp = temperature if temperature is not None else self.temperature
+        tokens = max_tokens if max_tokens is not None else self.max_tokens
+
+        log.debug("Starting streaming generation with history", num_messages=len(messages))
+
+        for chunk in self._llm.create_chat_completion(
+            messages=messages,
+            temperature=temp,
+            max_tokens=tokens,
+            stream=True,
+        ):
+            delta = chunk["choices"][0].get("delta", {})
+            if content := delta.get("content"):
+                yield content
+
     def unload(self) -> None:
         """Unload the model to free memory."""
         if self._llm is not None:

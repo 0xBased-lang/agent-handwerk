@@ -38,6 +38,7 @@ from phone_agent.db.repositories.compliance import (
     AuditLogRepository,
 )
 from phone_agent.db.repositories.sms import SMSMessageRepository
+from phone_agent.db.repositories.jobs import JobRepository
 
 __all__ = [
     # Base
@@ -60,4 +61,6 @@ __all__ = [
     "AuditLogRepository",
     # SMS
     "SMSMessageRepository",
+    # Handwerk
+    "JobRepository",
 ]

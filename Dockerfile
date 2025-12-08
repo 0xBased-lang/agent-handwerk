@@ -13,8 +13,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     && rm -rf /var/lib/apt/lists/*
 
+# Copy shared-libs first
+COPY shared-libs/ /build/shared-libs/
+
 # Copy and install Python dependencies
-COPY pyproject.toml .
+COPY pyproject.toml README.md ./
 COPY src/ src/
 
 # Install in virtual environment
@@ -24,6 +27,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Install llama-cpp-python with optimizations for ARM64
 ENV CMAKE_ARGS="-DLLAMA_NATIVE=ON"
 RUN pip install --no-cache-dir --upgrade pip wheel setuptools && \
+    pip install --no-cache-dir /build/shared-libs && \
     pip install --no-cache-dir .
 
 # Stage 2: Runtime image

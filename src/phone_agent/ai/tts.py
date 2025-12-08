@@ -235,12 +235,12 @@ class TextToSpeech:
                 wav_file.setsampwidth(2)  # 16-bit
                 wav_file.setframerate(self.sample_rate)
 
-                for audio_bytes in self._voice.synthesize_stream_raw(text):
-                    wav_file.writeframes(audio_bytes)
+                for audio_chunk in self._voice.synthesize(text):
+                    wav_file.writeframes(audio_chunk.audio_int16_bytes)
         else:
             # Write raw PCM
-            for audio_bytes in self._voice.synthesize_stream_raw(text):
-                audio_buffer.write(audio_bytes)
+            for audio_chunk in self._voice.synthesize(text):
+                audio_buffer.write(audio_chunk.audio_int16_bytes)
 
         audio_data = audio_buffer.getvalue()
 
@@ -272,9 +272,9 @@ class TextToSpeech:
 
         # Collect raw audio chunks
         audio_chunks = []
-        for audio_bytes in self._voice.synthesize_stream_raw(text):
+        for audio_chunk in self._voice.synthesize(text):
             # Convert bytes to int16 array
-            chunk = np.frombuffer(audio_bytes, dtype=np.int16)
+            chunk = np.frombuffer(audio_chunk.audio_int16_bytes, dtype=np.int16)
             audio_chunks.append(chunk)
 
         # Combine chunks

@@ -1012,3 +1012,485 @@ async def reschedule_appointment(
         notification_sent=notification_sent,
         audit_log_id=audit_entry.id,
     )
+
+
+# ============================================================================
+# DSGVO Data Subject Rights (Art. 15-22)
+# ============================================================================
+
+
+class DataAccessRequest(BaseModel):
+    """Request for data access (Art. 15 DSGVO)."""
+
+    contact_id: UUID = Field(..., description="Contact/Patient ID")
+    format: str = Field(default="json", description="Export format: json or csv")
+    include_audit_logs: bool = Field(default=True, description="Include audit trail")
+    include_calls: bool = Field(default=True, description="Include call records")
+    include_appointments: bool = Field(default=True, description="Include appointments")
+    include_consents: bool = Field(default=True, description="Include consent history")
+    include_sms: bool = Field(default=True, description="Include SMS messages")
+
+
+class DataAccessResponse(BaseModel):
+    """Response for data access request."""
+
+    request_id: UUID
+    contact_id: UUID
+    generated_at: datetime
+    format: str
+    data: dict[str, Any] | None = None
+    download_url: str | None = None
+
+
+class ErasureRequest(BaseModel):
+    """Request for data erasure (Art. 17 DSGVO)."""
+
+    contact_id: UUID = Field(..., description="Contact/Patient ID")
+    reason: str | None = Field(None, description="Reason for erasure request")
+    verify_legal_holds: bool = Field(default=True, description="Check for legal retention requirements")
+
+
+class ErasureResponse(BaseModel):
+    """Response for erasure request."""
+
+    request_id: UUID
+    contact_id: UUID
+    status: str  # "completed", "partial", "denied", "pending"
+    erased_records: dict[str, int]
+    retained_records: dict[str, int]
+    retention_reasons: list[str]
+    completed_at: datetime | None = None
+
+
+class PortabilityRequest(BaseModel):
+    """Request for data portability (Art. 20 DSGVO)."""
+
+    contact_id: UUID = Field(..., description="Contact/Patient ID")
+    format: str = Field(default="json", description="Export format: json")
+
+
+class PortabilityResponse(BaseModel):
+    """Response for data portability request."""
+
+    request_id: UUID
+    contact_id: UUID
+    format: str
+    generated_at: datetime
+    file_size_bytes: int
+    download_url: str | None = None
+    data: dict[str, Any] | None = None
+
+
+@router.post(
+    "/compliance/data-access",
+    response_model=DataAccessResponse,
+    summary="Request data access (Art. 15 DSGVO)",
+    description="""
+    Submit a request for access to all personal data held about a contact.
+
+    DSGVO Article 15 - Right of access by the data subject:
+    The data subject shall have the right to obtain confirmation as to whether
+    personal data are being processed and access to the personal data.
+
+    Returns all personal data in requested format (JSON or CSV).
+    """
+)
+async def request_data_access(
+    request: Request,
+    data: DataAccessRequest,
+    session: AsyncSession = Depends(get_db),
+) -> DataAccessResponse:
+    """Process data access request under Art. 15 DSGVO."""
+    request_id = uuid4()
+
+    # Log the access request
+    service = ComplianceService(session)
+    await service.log_data_access(
+        actor_id="api",
+        resource_type="data_access_request",
+        resource_id=str(request_id),
+        contact_id=data.contact_id,
+        action="data_access_requested",
+        ip_address=get_client_ip(request),
+        details={"format": data.format, "request_id": str(request_id)},
+    )
+
+    # Gather all data
+    export_data: dict[str, Any] = {
+        "request_id": str(request_id),
+        "contact_id": str(data.contact_id),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "data_categories": [],
+    }
+
+    # Get contact information
+    contact_repo = ContactRepository(session)
+    contact = await contact_repo.get(data.contact_id)
+
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+
+    export_data["personal_data"] = {
+        "first_name": contact.first_name,
+        "last_name": contact.last_name,
+        "phone_primary": contact.phone_primary,
+        "phone_secondary": contact.phone_secondary,
+        "email": contact.email,
+        "date_of_birth": contact.date_of_birth.isoformat() if contact.date_of_birth else None,
+        "address": contact.address,
+        "city": contact.city,
+        "postal_code": contact.postal_code,
+        "notes": contact.notes,
+        "created_at": contact.created_at.isoformat() if contact.created_at else None,
+    }
+    export_data["data_categories"].append("personal_data")
+
+    # Get consent history
+    if data.include_consents:
+        consent_repo = ConsentRepository(session)
+        consents = await consent_repo.get_by_contact(data.contact_id)
+        export_data["consents"] = [c.to_dict() for c in consents]
+        export_data["data_categories"].append("consents")
+
+    # Get call records
+    if data.include_calls:
+        call_repo = CallRepository(session)
+        calls = await call_repo.get_by_contact(data.contact_id, limit=1000)
+        export_data["calls"] = [
+            {
+                "id": str(c.id),
+                "direction": c.direction,
+                "status": c.status,
+                "duration": c.duration,
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+                "summary": c.summary,
+            }
+            for c in calls
+        ]
+        export_data["data_categories"].append("calls")
+
+    # Get appointments
+    if data.include_appointments:
+        appt_repo = AppointmentRepository(session)
+        appointments = await appt_repo.get_by_contact(data.contact_id, limit=1000)
+        export_data["appointments"] = [a.to_dict() for a in appointments]
+        export_data["data_categories"].append("appointments")
+
+    # Get audit logs
+    if data.include_audit_logs:
+        audit_repo = AuditLogRepository(session)
+        logs = await audit_repo.get_by_contact(data.contact_id, limit=1000)
+        export_data["audit_logs"] = [l.to_dict() for l in logs]
+        export_data["data_categories"].append("audit_logs")
+
+    # Get SMS messages
+    if data.include_sms:
+        try:
+            from phone_agent.db.repositories.sms import SMSRepository
+            sms_repo = SMSRepository(session)
+            messages = await sms_repo.get_by_contact(data.contact_id, limit=1000)
+            export_data["sms_messages"] = [m.to_dict() for m in messages]
+            export_data["data_categories"].append("sms_messages")
+        except Exception:
+            pass  # SMS module may not exist
+
+    await session.commit()
+
+    return DataAccessResponse(
+        request_id=request_id,
+        contact_id=data.contact_id,
+        generated_at=datetime.now(timezone.utc),
+        format=data.format,
+        data=export_data,
+    )
+
+
+@router.post(
+    "/compliance/data-erasure",
+    response_model=ErasureResponse,
+    summary="Request data erasure (Art. 17 DSGVO)",
+    description="""
+    Submit a request for erasure of all personal data (Right to be forgotten).
+
+    DSGVO Article 17 - Right to erasure:
+    The data subject shall have the right to obtain erasure of personal data
+    without undue delay where certain grounds apply.
+
+    Note: Some data may be retained due to legal requirements (e.g., medical records
+    for 10 years under German law). Retained data will be anonymized where possible.
+    """
+)
+async def request_data_erasure(
+    request: Request,
+    data: ErasureRequest,
+    session: AsyncSession = Depends(get_db),
+) -> ErasureResponse:
+    """Process data erasure request under Art. 17 DSGVO."""
+    request_id = uuid4()
+
+    # Log the erasure request
+    service = ComplianceService(session)
+    await service.log_data_access(
+        actor_id="api",
+        resource_type="data_erasure_request",
+        resource_id=str(request_id),
+        contact_id=data.contact_id,
+        action="data_erasure_requested",
+        ip_address=get_client_ip(request),
+        details={"reason": data.reason, "request_id": str(request_id)},
+    )
+
+    # Check contact exists
+    contact_repo = ContactRepository(session)
+    contact = await contact_repo.get(data.contact_id)
+
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+
+    erased_records: dict[str, int] = {}
+    retained_records: dict[str, int] = {}
+    retention_reasons: list[str] = []
+
+    # Check for legal holds (medical records = 10 years)
+    if data.verify_legal_holds:
+        # Check for recent medical appointments (within 10 years)
+        appt_repo = AppointmentRepository(session)
+        recent_cutoff = datetime.now(timezone.utc) - timedelta(days=10 * 365)
+
+        appointments = await appt_repo.get_by_contact(data.contact_id, limit=1000)
+        medical_appointments = [
+            a for a in appointments
+            if a.created_at and a.created_at > recent_cutoff
+        ]
+
+        if medical_appointments:
+            retained_records["appointments"] = len(medical_appointments)
+            retention_reasons.append(
+                f"§ 630f BGB: {len(medical_appointments)} Termine müssen für 10 Jahre aufbewahrt werden"
+            )
+
+    # Anonymize contact data (keep structure but remove PII)
+    original_data = {
+        "first_name": contact.first_name,
+        "last_name": contact.last_name,
+        "phone_primary": contact.phone_primary,
+        "email": contact.email,
+    }
+
+    contact.first_name = "[GELÖSCHT]"
+    contact.last_name = "[GELÖSCHT]"
+    contact.phone_primary = None
+    contact.phone_secondary = None
+    contact.email = None
+    contact.date_of_birth = None
+    contact.address = None
+    contact.city = None
+    contact.postal_code = None
+    contact.notes = "[DATEN GELÖSCHT - Art. 17 DSGVO]"
+
+    erased_records["personal_data"] = 1
+
+    # Delete SMS messages (no legal retention requirement)
+    try:
+        from phone_agent.db.models.sms import SMSMessageModel
+        from sqlalchemy import delete as sql_delete
+
+        sms_result = await session.execute(
+            sql_delete(SMSMessageModel).where(SMSMessageModel.contact_id == data.contact_id)
+        )
+        erased_records["sms_messages"] = sms_result.rowcount
+    except Exception:
+        pass
+
+    # Anonymize call transcripts (keep call records for statistics)
+    try:
+        from phone_agent.db.models import CallModel
+        from sqlalchemy import update
+
+        call_result = await session.execute(
+            update(CallModel)
+            .where(CallModel.contact_id == data.contact_id)
+            .values(transcript=None, summary="[GELÖSCHT]")
+        )
+        erased_records["call_transcripts"] = call_result.rowcount
+    except Exception:
+        pass
+
+    # Withdraw all consents
+    consent_repo = ConsentRepository(session)
+    consents = await consent_repo.get_by_contact(data.contact_id)
+    for consent in consents:
+        if consent.status == "granted":
+            consent.withdraw(notes="Art. 17 DSGVO - Löschantrag")
+    erased_records["consents_withdrawn"] = len(consents)
+
+    # Log the completed erasure
+    await service.log_data_access(
+        actor_id="api",
+        resource_type="data_erasure_completed",
+        resource_id=str(request_id),
+        contact_id=data.contact_id,
+        action="data_erasure_completed",
+        ip_address=get_client_ip(request),
+        details={
+            "erased": erased_records,
+            "retained": retained_records,
+            "retention_reasons": retention_reasons,
+        },
+    )
+
+    await session.commit()
+
+    return ErasureResponse(
+        request_id=request_id,
+        contact_id=data.contact_id,
+        status="completed" if not retained_records else "partial",
+        erased_records=erased_records,
+        retained_records=retained_records,
+        retention_reasons=retention_reasons,
+        completed_at=datetime.now(timezone.utc),
+    )
+
+
+@router.post(
+    "/compliance/data-portability",
+    response_model=PortabilityResponse,
+    summary="Request data portability (Art. 20 DSGVO)",
+    description="""
+    Request personal data in a portable, machine-readable format.
+
+    DSGVO Article 20 - Right to data portability:
+    The data subject shall have the right to receive personal data in a
+    structured, commonly used and machine-readable format.
+
+    Returns all data provided by the data subject in JSON format.
+    """
+)
+async def request_data_portability(
+    request: Request,
+    data: PortabilityRequest,
+    session: AsyncSession = Depends(get_db),
+) -> PortabilityResponse:
+    """Process data portability request under Art. 20 DSGVO."""
+    request_id = uuid4()
+
+    # Log the portability request
+    service = ComplianceService(session)
+    await service.log_data_access(
+        actor_id="api",
+        resource_type="data_portability_request",
+        resource_id=str(request_id),
+        contact_id=data.contact_id,
+        action="data_portability_requested",
+        ip_address=get_client_ip(request),
+        details={"format": data.format, "request_id": str(request_id)},
+    )
+
+    # Get contact
+    contact_repo = ContactRepository(session)
+    contact = await contact_repo.get(data.contact_id)
+
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+
+    # Build portable data package (only data provided by data subject)
+    portable_data = {
+        "meta": {
+            "format": "DSGVO_Art20_Export",
+            "version": "1.0",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "contact_id": str(data.contact_id),
+        },
+        "personal_information": {
+            "first_name": contact.first_name,
+            "last_name": contact.last_name,
+            "phone_primary": contact.phone_primary,
+            "phone_secondary": contact.phone_secondary,
+            "email": contact.email,
+            "date_of_birth": contact.date_of_birth.isoformat() if contact.date_of_birth else None,
+            "address": contact.address,
+            "city": contact.city,
+            "postal_code": contact.postal_code,
+        },
+        "consents": [],
+        "appointments": [],
+    }
+
+    # Get consents (user-provided)
+    consent_repo = ConsentRepository(session)
+    consents = await consent_repo.get_by_contact(data.contact_id)
+    portable_data["consents"] = [
+        {
+            "type": c.consent_type,
+            "status": c.status,
+            "granted_at": c.granted_at.isoformat() if c.granted_at else None,
+        }
+        for c in consents
+    ]
+
+    # Get appointments (user-initiated)
+    appt_repo = AppointmentRepository(session)
+    appointments = await appt_repo.get_by_contact(data.contact_id, limit=1000)
+    portable_data["appointments"] = [
+        {
+            "date": a.date.isoformat() if a.date else None,
+            "time": a.time.isoformat() if a.time else None,
+            "type": a.appointment_type,
+            "status": a.status,
+            "reason": a.reason,
+        }
+        for a in appointments
+    ]
+
+    await session.commit()
+
+    # Calculate size
+    import json
+    json_str = json.dumps(portable_data, ensure_ascii=False)
+    file_size = len(json_str.encode('utf-8'))
+
+    return PortabilityResponse(
+        request_id=request_id,
+        contact_id=data.contact_id,
+        format=data.format,
+        generated_at=datetime.now(timezone.utc),
+        file_size_bytes=file_size,
+        data=portable_data,
+    )
+
+
+@router.get(
+    "/compliance/data-subject-rights",
+    summary="Get data subject rights information (DSGVO Art. 15-22)",
+    description="Returns information about available data subject rights in German and English."
+)
+async def get_data_subject_rights_info(
+    language: str = Query(default="de", description="Language: de or en"),
+) -> dict[str, Any]:
+    """Get information about DSGVO data subject rights."""
+    from phone_agent.industry.gesundheit.compliance import get_data_protection_service
+
+    service = get_data_protection_service()
+    rights_info = service.get_data_subject_rights_info(language)
+
+    return {
+        "language": language,
+        "rights": rights_info,
+        "endpoints": {
+            "data_access": {
+                "method": "POST",
+                "path": "/api/v1/compliance/data-access",
+                "description": "Request access to all personal data (Art. 15)",
+            },
+            "data_erasure": {
+                "method": "POST",
+                "path": "/api/v1/compliance/data-erasure",
+                "description": "Request erasure of personal data (Art. 17)",
+            },
+            "data_portability": {
+                "method": "POST",
+                "path": "/api/v1/compliance/data-portability",
+                "description": "Request data in portable format (Art. 20)",
+            },
+        },
+    }

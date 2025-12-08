@@ -6,10 +6,13 @@ import asyncio
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
+from pathlib import Path
+
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
+from fastapi.staticfiles import StaticFiles
 from slowapi.errors import RateLimitExceeded
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -32,10 +35,27 @@ from phone_agent.api import (
     crm,
     web_audio,
     compliance,
+    handwerk_demo,
+    handwerk,
+    websocket_analytics,
+    chat_websocket,
+    jobs,
 )
 from phone_agent.db import init_db, close_db
-from phone_agent.services.campaign_scheduler import CampaignScheduler
+from phone_agent.services.campaign_scheduler import CampaignScheduler, SchedulerConfig
 from phone_agent.api.rate_limits import limiter
+from phone_agent.industry.gesundheit.compliance import (
+    start_audit_persistence,
+    stop_audit_persistence,
+)
+from phone_agent.services.data_retention import (
+    start_retention_scheduler,
+    stop_retention_scheduler,
+)
+from phone_agent.api.websocket_analytics import (
+    start_websocket_broadcasts,
+    stop_websocket_broadcasts,
+)
 
 
 def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
@@ -161,6 +181,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await init_db()
     log.info("Database initialized successfully")
 
+    # Start DSGVO audit persistence (CRITICAL for compliance)
+    log.info("Starting DSGVO audit persistence")
+    await start_audit_persistence()
+    log.info("DSGVO audit persistence started")
+
+    # Start data retention scheduler (DSGVO cleanup at 3 AM daily)
+    retention_enabled = getattr(settings, "data_retention_enabled", True)
+    if retention_enabled:
+        log.info("Starting data retention scheduler")
+        await start_retention_scheduler(run_at_hour=3)
+        log.info("Data retention scheduler started (runs at 3 AM daily)")
+
+    # Start WebSocket broadcast loops for real-time dashboard
+    log.info("Starting WebSocket broadcast loops")
+    await start_websocket_broadcasts()
+    log.info("WebSocket broadcasts started")
+
     # Start heartbeat client
     heartbeat: HeartbeatClient | None = None
     if settings.remote_enabled:
@@ -176,10 +213,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Start campaign scheduler for recall campaigns
     scheduler: CampaignScheduler | None = None
     if getattr(settings, "campaign_scheduler_enabled", True):
-        scheduler = CampaignScheduler(
-            poll_interval=getattr(settings, "campaign_poll_interval", 60),
+        scheduler_config = SchedulerConfig(
+            poll_interval_seconds=getattr(settings, "campaign_poll_interval", 60),
             max_concurrent_calls=getattr(settings, "max_concurrent_calls", 5),
         )
+        scheduler = CampaignScheduler(config=scheduler_config)
         await scheduler.start()
         log.info("Campaign scheduler started")
 
@@ -243,6 +281,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     if heartbeat:
         await heartbeat.stop()
+
+    # Stop WebSocket broadcasts
+    log.info("Stopping WebSocket broadcasts")
+    await stop_websocket_broadcasts()
+    log.info("WebSocket broadcasts stopped")
+
+    # Stop data retention scheduler
+    log.info("Stopping data retention scheduler")
+    await stop_retention_scheduler()
+    log.info("Data retention scheduler stopped")
+
+    # Stop DSGVO audit persistence (flush remaining logs)
+    log.info("Stopping DSGVO audit persistence")
+    await stop_audit_persistence()
+    log.info("DSGVO audit persistence stopped")
 
     # Close database connections
     await close_db()
@@ -308,6 +361,16 @@ def create_app() -> FastAPI:
     app.include_router(crm.router, prefix="/api/v1", tags=["CRM"])
     app.include_router(web_audio.router, prefix="/api/v1", tags=["Web Audio"])
     app.include_router(compliance.router, prefix="/api/v1", tags=["Compliance"])
+    app.include_router(handwerk_demo.router, tags=["Handwerk Demo"])
+    app.include_router(handwerk.router, prefix="/api/v1", tags=["Handwerk"])
+    app.include_router(websocket_analytics.router, prefix="/api/v1/ws", tags=["WebSocket Analytics"])
+    app.include_router(chat_websocket.router, prefix="/api/v1", tags=["Chat"])
+    app.include_router(jobs.router, prefix="/api/v1", tags=["Jobs"])
+
+    # Mount static files for browser testing
+    static_dir = Path(__file__).parent.parent.parent / "static"
+    if static_dir.exists():
+        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
     return app
 
