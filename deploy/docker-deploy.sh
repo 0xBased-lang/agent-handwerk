@@ -60,7 +60,7 @@ if [ ! -f ".env" ]; then
     fi
 fi
 
-# Validate required API keys
+# Validate required API keys and configuration
 source .env 2>/dev/null || true
 if [ -z "$GROQ_API_KEY" ] || [ "$GROQ_API_KEY" = "your_groq_api_key_here" ]; then
     warn "GROQ_API_KEY not configured in .env"
@@ -70,6 +70,14 @@ if [ -z "$DEEPGRAM_API_KEY" ] || [ "$DEEPGRAM_API_KEY" = "your_deepgram_api_key_
 fi
 if [ -z "$ELEVENLABS_API_KEY" ] || [ "$ELEVENLABS_API_KEY" = "your_elevenlabs_api_key_here" ]; then
     warn "ELEVENLABS_API_KEY not configured in .env"
+fi
+
+# Validate JWT secret for multi-tenant auth (required in production)
+if [ "$ITF_ENVIRONMENT" = "production" ]; then
+    if [ -z "$ITF_JWT_SECRET_KEY" ] || [ "$ITF_JWT_SECRET_KEY" = "GENERATE_A_SECURE_KEY_HERE" ]; then
+        warn "ITF_JWT_SECRET_KEY not configured for production!"
+        warn "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(64))\""
+    fi
 fi
 
 # Create data directory

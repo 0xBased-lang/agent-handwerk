@@ -12,6 +12,7 @@ from phone_agent.db.base import (
     TimestampMixin,
     SoftDeleteMixin,
     IndustryMixin,
+    TenantMixin,
     generate_uuid,
 )
 from phone_agent.db.session import (
@@ -32,6 +33,7 @@ __all__ = [
     "TimestampMixin",
     "SoftDeleteMixin",
     "IndustryMixin",
+    "TenantMixin",
     "generate_uuid",
     # Session management
     "get_engine",

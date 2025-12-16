@@ -15,6 +15,13 @@ Specialized:
 - DashboardSnapshotRepository: Dashboard snapshots
 - SMSMessageRepository: SMS delivery tracking
 
+Multi-Tenant:
+- TenantRepository: Company/tenant management
+- DepartmentRepository: Department CRUD with tenant isolation
+- WorkerRepository: Worker management
+- TaskRepository: Task management with routing
+- RoutingRuleRepository: Routing rules
+
 Services:
 - AnalyticsService: High-level analytics aggregation
 """
@@ -39,6 +46,13 @@ from phone_agent.db.repositories.compliance import (
 )
 from phone_agent.db.repositories.sms import SMSMessageRepository
 from phone_agent.db.repositories.jobs import JobRepository
+from phone_agent.db.repositories.tenant_repos import (
+    TenantRepository,
+    DepartmentRepository,
+    WorkerRepository,
+    TaskRepository,
+    RoutingRuleRepository,
+)
 
 __all__ = [
     # Base
@@ -63,4 +77,10 @@ __all__ = [
     "SMSMessageRepository",
     # Handwerk
     "JobRepository",
+    # Multi-Tenant
+    "TenantRepository",
+    "DepartmentRepository",
+    "WorkerRepository",
+    "TaskRepository",
+    "RoutingRuleRepository",
 ]

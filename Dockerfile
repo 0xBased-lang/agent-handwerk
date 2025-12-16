@@ -56,6 +56,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 COPY src/ src/
 COPY configs/ configs/
 COPY prompts/ prompts/
+COPY static/ static/
 
 # Create directories
 RUN mkdir -p /app/data /app/models /app/logs

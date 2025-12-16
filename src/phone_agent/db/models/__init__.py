@@ -8,7 +8,7 @@ Core Models:
 
 CRM Models:
 - ContactModel: Patients/customers
-- CompanyModel: Business entities
+- CompanyModel: Business entities (for B2B relationships)
 - ContactCompanyLinkModel: M2M relationship
 
 Compliance Models:
@@ -29,7 +29,13 @@ SMS Models:
 Handwerk Models:
 - JobModel: Service requests and work orders
 - QuoteModel: Cost estimates and quotes
-- QuoteItemModel: Line items for quotes
+
+Multi-Tenant Models:
+- TenantModel: Platform customer (the company using IT-Friends)
+- DepartmentModel: Internal departments within a tenant
+- WorkerModel: Employees/workers within a tenant
+- TaskModel: Unified task queue (from phone, email, etc.)
+- RoutingRuleModel: Custom routing rules per tenant
 """
 
 # Core models
@@ -77,6 +83,15 @@ from phone_agent.db.models.handwerk import (
     QuoteModel,
 )
 
+# Multi-Tenant models
+from phone_agent.db.models.tenant import (
+    TenantModel,
+    DepartmentModel,
+    WorkerModel,
+    TaskModel,
+    RoutingRuleModel,
+)
+
 __all__ = [
     # Core
     "CallModel",
@@ -102,4 +117,10 @@ __all__ = [
     # Handwerk
     "JobModel",
     "QuoteModel",
+    # Multi-Tenant
+    "TenantModel",
+    "DepartmentModel",
+    "WorkerModel",
+    "TaskModel",
+    "RoutingRuleModel",
 ]

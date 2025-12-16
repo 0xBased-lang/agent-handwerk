@@ -1,0 +1,47 @@
+# IT-Friends Handwerk Dashboard - Docker Compose (Standalone)
+# ============================================================
+# Use this for local development or standalone deployment.
+# For full VPS deployment with backend, use ../docker-compose.vps.yml
+#
+# Usage:
+#   docker compose up -d
+#   docker compose logs -f
+version: "3.8"
+
+services:
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: itfriends/handwerk-dashboard:${VERSION:-latest}
+    container_name: itf-handwerk-dashboard
+    restart: unless-stopped
+    ports:
+      - "${DASHBOARD_PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=production
+      # API URL - for standalone mode, point to external backend
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8080}
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# For integration with full stack, use external network
+networks:
+  default:
+    name: itf-network
+    external: true

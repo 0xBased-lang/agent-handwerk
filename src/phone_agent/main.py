@@ -41,6 +41,7 @@ from phone_agent.api import (
     chat_websocket,
     jobs,
 )
+from phone_agent.api import tenant_api, email_api
 from phone_agent.db import init_db, close_db
 from phone_agent.services.campaign_scheduler import CampaignScheduler, SchedulerConfig
 from phone_agent.api.rate_limits import limiter
@@ -201,10 +202,30 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Start heartbeat client
     heartbeat: HeartbeatClient | None = None
     if settings.remote_enabled:
+        # Get industry from settings (defaults to GESUNDHEIT for backward compatibility)
+        industry_name = getattr(settings, "industry", {})
+        if isinstance(industry_name, dict):
+            industry_name = industry_name.get("name", "gesundheit")
+        elif hasattr(industry_name, "name"):
+            industry_name = industry_name.name
+        else:
+            industry_name = "gesundheit"
+
+        # Map industry name to Industry enum
+        # Note: GASTRO enum value is "gastronomie_hotellerie" but config uses "gastro"
+        industry_map = {
+            "gesundheit": Industry.GESUNDHEIT,
+            "handwerk": Industry.HANDWERK,
+            "gastro": Industry.GASTRO,
+            "gastronomie_hotellerie": Industry.GASTRO,
+            "freie_berufe": Industry.FREIE_BERUFE,
+        }
+        industry_enum = industry_map.get(industry_name, Industry.GESUNDHEIT)
+
         heartbeat = HeartbeatClient(
             device_id=settings.device_id,
             product="phone-agent",
-            industry=Industry.GESUNDHEIT,
+            industry=industry_enum,
             endpoint=settings.heartbeat_endpoint,
             interval=settings.heartbeat_interval,
         )
@@ -366,11 +387,19 @@ def create_app() -> FastAPI:
     app.include_router(websocket_analytics.router, prefix="/api/v1/ws", tags=["WebSocket Analytics"])
     app.include_router(chat_websocket.router, prefix="/api/v1", tags=["Chat"])
     app.include_router(jobs.router, prefix="/api/v1", tags=["Jobs"])
+    app.include_router(tenant_api.router, prefix="/api/v1", tags=["Multi-Tenant"])
+    app.include_router(email_api.router, prefix="/api/v1", tags=["Email Agent"])
 
     # Mount static files for browser testing
-    static_dir = Path(__file__).parent.parent.parent / "static"
-    if static_dir.exists():
+    # Use absolute path since __file__ may point to installed package location
+    static_dir = Path("/app/static")
+    log = get_logger(__name__)
+    log.info(f"Mounting static files from {static_dir}")
+    try:
         app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+        log.info("Static files mounted successfully")
+    except Exception as e:
+        log.error(f"Failed to mount static files: {e}")
 
     return app
 

@@ -27,6 +27,38 @@ INDUSTRY_MODULES = {
 }
 
 
+# ==============================================================================
+# Shared Utilities (Industry-Agnostic)
+# ==============================================================================
+
+
+async def get_time_of_day() -> str:
+    """Get German greeting based on time of day.
+
+    This is an industry-agnostic utility used for greetings across all industries.
+
+    Returns:
+        German time-of-day string: "Morgen", "Mittag", "Nachmittag", or "Abend"
+    """
+    from datetime import datetime
+
+    hour = datetime.now().hour
+
+    if hour < 11:
+        return "Morgen"
+    elif hour < 14:
+        return "Mittag"
+    elif hour < 18:
+        return "Nachmittag"
+    else:
+        return "Abend"
+
+
+# ==============================================================================
+# Prompts Loading
+# ==============================================================================
+
+
 @lru_cache(maxsize=32)
 def get_prompts_module(industry: str, language: str = "de") -> Any:
     """Load the prompts module for an industry and language.
@@ -232,3 +264,224 @@ class MultilingualPrompts:
             Prompt string or empty string if not found
         """
         return getattr(self._module, name, "")
+
+
+# ==============================================================================
+# Industry Module Loading (for triage, intake, etc.)
+# ==============================================================================
+
+
+@lru_cache(maxsize=16)
+def get_industry_module(industry: str) -> Any:
+    """Load the main industry module (triage, intake, etc.).
+
+    This returns the industry's main module which contains:
+    - perform_triage() or perform_intake() function
+    - TriageResult or IntakeResult dataclass
+    - Industry-specific enums and helpers
+
+    Args:
+        industry: Industry name (gesundheit, handwerk, gastro, freie_berufe)
+
+    Returns:
+        Industry module with triage/intake functions
+
+    Raises:
+        ImportError: If industry module not found
+    """
+    base_module = INDUSTRY_MODULES.get(industry)
+    if not base_module:
+        log.warning(
+            "Unknown industry, falling back to gesundheit",
+            requested=industry,
+        )
+        base_module = INDUSTRY_MODULES["gesundheit"]
+        industry = "gesundheit"
+
+    # Each industry has a different main module:
+    # - gesundheit: triage.py (perform_triage, TriageResult)
+    # - handwerk: __init__.py imports perform_triage from workflows.py
+    # - gastro: intake.py (perform_intake, IntakeResult) - if exists
+    # - freie_berufe: intake.py (perform_intake, IntakeResult) - if exists
+
+    # Try triage module first (most common)
+    try:
+        module_path = f"{base_module}.triage"
+        module = importlib.import_module(module_path)
+        # Check if it has the triage function
+        if hasattr(module, "perform_triage"):
+            log.debug(
+                "Loaded industry triage module",
+                industry=industry,
+                module=module_path,
+            )
+            return module
+        # Otherwise, fall through to try other modules
+    except ImportError:
+        pass
+
+    # Try intake module
+    try:
+        module_path = f"{base_module}.intake"
+        module = importlib.import_module(module_path)
+        if hasattr(module, "perform_intake"):
+            log.debug(
+                "Loaded industry intake module",
+                industry=industry,
+                module=module_path,
+            )
+            return module
+    except ImportError:
+        pass
+
+    # Fallback to main __init__ module (some industries like handwerk
+    # export perform_triage from the main module which imports from workflows)
+    try:
+        module = importlib.import_module(base_module)
+        log.debug(
+            "Loaded industry base module",
+            industry=industry,
+            module=base_module,
+        )
+        return module
+    except ImportError:
+        log.exception(
+            "Failed to load industry module",
+            industry=industry,
+        )
+        raise
+
+
+def get_triage_function(industry: str) -> Any:
+    """Get the triage/intake function for an industry.
+
+    Args:
+        industry: Industry name
+
+    Returns:
+        Callable triage function (perform_triage or perform_intake)
+    """
+    module = get_industry_module(industry)
+
+    # Try different function names
+    for func_name in ["perform_triage", "perform_intake", "classify_request"]:
+        func = getattr(module, func_name, None)
+        if func is not None:
+            return func
+
+    log.warning(
+        "No triage function found for industry",
+        industry=industry,
+    )
+    return None
+
+
+def get_triage_result_class(industry: str) -> Any:
+    """Get the TriageResult/IntakeResult class for an industry.
+
+    Args:
+        industry: Industry name
+
+    Returns:
+        Result dataclass (TriageResult, IntakeResult, etc.)
+    """
+    module = get_industry_module(industry)
+
+    # Try different class names
+    for class_name in ["TriageResult", "IntakeResult", "ClassificationResult"]:
+        cls = getattr(module, class_name, None)
+        if cls is not None:
+            return cls
+
+    log.warning(
+        "No result class found for industry",
+        industry=industry,
+    )
+    return None
+
+
+class IndustryAdapter:
+    """Unified adapter for industry-specific functionality.
+
+    Provides a consistent interface regardless of the industry module's
+    internal structure. Use this for multi-tenant scenarios where the
+    industry changes based on tenant configuration.
+
+    Example usage:
+        adapter = IndustryAdapter("handwerk", language="de")
+        result = adapter.perform_triage(user_text)
+        system_prompt = adapter.system_prompt
+    """
+
+    def __init__(self, industry: str, language: str = "de"):
+        """Initialize adapter for an industry.
+
+        Args:
+            industry: Industry name (gesundheit, handwerk, etc.)
+            language: Language code for prompts
+        """
+        self.industry = industry
+        self.language = language
+        self._prompts = MultilingualPrompts(industry, language)
+        self._triage_module = get_industry_module(industry)
+        self._triage_func = get_triage_function(industry)
+        self._result_class = get_triage_result_class(industry)
+
+    @property
+    def system_prompt(self) -> str:
+        """Get the system prompt for this industry."""
+        return self._prompts.system_prompt
+
+    @property
+    def greeting_prompt(self) -> str:
+        """Get the greeting prompt."""
+        return self._prompts.greeting_prompt
+
+    @property
+    def farewell_prompt(self) -> str:
+        """Get the farewell prompt."""
+        return self._prompts.farewell_prompt
+
+    @property
+    def triage_result_class(self) -> Any:
+        """Get the TriageResult class for this industry."""
+        return self._result_class
+
+    def perform_triage(self, text: str, **kwargs) -> Any:
+        """Perform triage/intake on user text.
+
+        Args:
+            text: User input text
+            **kwargs: Additional arguments for the triage function
+
+        Returns:
+            TriageResult or IntakeResult depending on industry
+        """
+        if self._triage_func is None:
+            log.warning(
+                "No triage function available",
+                industry=self.industry,
+            )
+            return None
+
+        return self._triage_func(text, **kwargs)
+
+    def set_language(self, language: str) -> None:
+        """Change the language for prompts.
+
+        Args:
+            language: New language code
+        """
+        self.language = language
+        self._prompts.set_language(language)
+
+    def get_prompt(self, name: str) -> str:
+        """Get any prompt by name.
+
+        Args:
+            name: Prompt constant name
+
+        Returns:
+            Prompt string or empty if not found
+        """
+        return self._prompts.get_prompt(name)

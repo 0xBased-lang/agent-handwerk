@@ -1,0 +1,152 @@
+version: '3.8'
+
+# IT-Friends Handwerk - VPS Deployment Stack
+# ==========================================
+# Standalone deployment for Handwerk (trades) industry.
+# Runs alongside Lieferservice on separate ports.
+#
+# Usage:
+#   docker network create handwerk-network
+#   docker compose -f docker-compose.vps.yml up -d --build
+#
+# Ports:
+#   - 8180: Phone Agent API (FastAPI)
+#   - 3100: Dashboard (Next.js)
+#
+# Note: No Nginx included - uses Lieferservice's nginx or direct port access
+
+services:
+  # ===================
+  # Phone Agent Backend
+  # ===================
+  phone-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: itfriends/handwerk-phone-agent:${VERSION:-latest}
+    container_name: handwerk-phone-agent
+    restart: unless-stopped
+    ports:
+      - "8180:8080"
+    volumes:
+      # Configuration (read-only)
+      - ./configs:/app/configs:ro
+      - ./prompts:/app/prompts:ro
+      # AI Models (read-only)
+      - ./models:/app/models:ro
+      # Database persistence
+      - ./data/handwerk:/app/data
+      # Static files (admin dashboard, chat widget)
+      - ./static:/app/static:ro
+    environment:
+      # Core settings
+      - ITF_ENV=${ITF_ENV:-production}
+      - ITF_DEVICE_ID=${ITF_DEVICE_ID:-handwerk-vps-1}
+      - ITF_LOG_LEVEL=${ITF_LOG_LEVEL:-INFO}
+      - ITF_LOG_JSON=true
+      - ITF_DEBUG=${ITF_DEBUG:-false}
+
+      # Industry Configuration (HANDWERK)
+      - ITF_INDUSTRY__NAME=handwerk
+      - ITF_INDUSTRY__DISPLAY_NAME=${ITF_INDUSTRY__DISPLAY_NAME:-Handwerksbetrieb}
+
+      # API settings
+      - ITF_API_HOST=0.0.0.0
+      - ITF_API_PORT=8080
+
+      # AI Models (LLM via Groq for faster inference)
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - ITF_AI__LLM__USE_GROQ=${ITF_AI__LLM__USE_GROQ:-true}
+      - ITF_AI__LLM__MODEL=${ITF_AI__LLM__MODEL:-llama-3.1-8b-instant}
+
+      # Database (SQLite for simplicity)
+      - DATABASE_URL=${DATABASE_URL:-sqlite:///data/handwerk.db}
+
+      # Telephony (optional - for SMS notifications)
+      - ITF_TELEPHONY__SIPGATE__ENABLED=${ITF_TELEPHONY__SIPGATE__ENABLED:-false}
+      - ITF_TELEPHONY__SIPGATE__TOKEN_ID=${ITF_TELEPHONY__SIPGATE__TOKEN_ID:-}
+      - ITF_TELEPHONY__SIPGATE__TOKEN=${ITF_TELEPHONY__SIPGATE__TOKEN:-}
+      - ITF_TELEPHONY__SIPGATE__SMS_ID=${ITF_TELEPHONY__SIPGATE__SMS_ID:-}
+
+      # JWT Authentication (for multi-tenant API)
+      - ITF_JWT_SECRET_KEY=${ITF_JWT_SECRET_KEY:-change-this-in-production}
+      - ITF_JWT_EXPIRY_MINUTES=${ITF_JWT_EXPIRY_MINUTES:-60}
+
+      # Email Agent (for email-to-task conversion)
+      - ITF_EMAIL_AGENT__ENABLED=${ITF_EMAIL_AGENT__ENABLED:-false}
+      - ITF_EMAIL_AGENT__POLL_INTERVAL_MINUTES=${ITF_EMAIL_AGENT__POLL_INTERVAL_MINUTES:-5}
+
+      # DSGVO Compliance
+      - ITF_DSGVO__ENABLED=true
+      - ITF_DSGVO__RETENTION_DAYS=${ITF_DSGVO__RETENTION_DAYS:-365}
+
+      # Feature flags
+      - ITF_PRELOAD_AI_MODELS=${ITF_PRELOAD_AI_MODELS:-false}
+      - ITF_CAMPAIGN_SCHEDULER_ENABLED=${ITF_CAMPAIGN_SCHEDULER_ENABLED:-true}
+      - ITF_REMOTE_ENABLED=${ITF_REMOTE_ENABLED:-false}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    networks:
+      - handwerk-network
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 1G
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  # ====================
+  # Dashboard Frontend
+  # ====================
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    image: itfriends/handwerk-dashboard:${VERSION:-latest}
+    container_name: handwerk-dashboard
+    restart: unless-stopped
+    ports:
+      - "3100:3000"
+    environment:
+      - NODE_ENV=production
+      # API URL - internal Docker network reference
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://phone-agent:8080}
+    depends_on:
+      phone-agent:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - handwerk-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  handwerk-network:
+    driver: bridge
+
+volumes:
+  handwerk-data:
+    driver: local

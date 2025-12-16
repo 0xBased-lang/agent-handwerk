@@ -134,6 +134,40 @@ class IndustryMixin:
         return mapped_column(String(50), nullable=False, index=True)
 
 
+class TenantMixin:
+    """Mixin for multi-tenant models.
+
+    Provides tenant isolation via company_id foreign key.
+    All tenant-aware models should use this mixin to ensure
+    data isolation between different companies.
+
+    Usage:
+        class MyModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
+            __tablename__ = "my_table"
+            # ... other columns ...
+
+    The tenant_id must always be filtered in queries to ensure
+    data isolation. Use repository patterns that enforce this.
+    """
+
+    @declared_attr
+    def tenant_id(cls) -> Mapped[UUID]:
+        """Company/tenant this record belongs to.
+
+        Foreign key to companies.id. This column is indexed
+        for efficient filtering and should be included in
+        composite indexes for frequently queried columns.
+        """
+        from sqlalchemy import ForeignKey
+
+        return mapped_column(
+            UUIDType(),
+            ForeignKey("companies.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+
+
 # Convenience function to generate UUID strings
 def generate_uuid() -> str:
     """Generate a new UUID string."""

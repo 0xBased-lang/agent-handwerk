@@ -28,10 +28,9 @@ from phone_agent.ai import (
     TextToSpeech,
 )
 from phone_agent.config import get_settings
-from phone_agent.industry.gesundheit import (
-    SYSTEM_PROMPT,
-    perform_triage,
-    TriageResult,
+from phone_agent.industry.prompt_loader import (
+    IndustryAdapter,
+    get_triage_result_class,
 )
 
 log = get_logger(__name__)
@@ -81,7 +80,7 @@ class ConversationTurn:
     content: str
     timestamp: datetime = field(default_factory=datetime.now)
     audio_duration: float | None = None
-    triage_result: TriageResult | None = None
+    triage_result: Any | None = None  # Industry-specific: TriageResult, IntakeResult, etc.
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -91,12 +90,31 @@ class ConversationState:
 
     id: UUID = field(default_factory=uuid4)
     turns: list[ConversationTurn] = field(default_factory=list)
-    patient_name: str | None = None
-    patient_phone: str | None = None
-    triage_result: TriageResult | None = None
+    customer_name: str | None = None  # Renamed from patient_name for multi-industry
+    customer_phone: str | None = None  # Renamed from patient_phone
+    triage_result: Any | None = None  # Industry-specific: TriageResult, IntakeResult, etc.
     appointment_id: UUID | None = None
     started_at: datetime = field(default_factory=datetime.now)
     ended_at: datetime | None = None
+
+    # Legacy aliases for backward compatibility
+    @property
+    def patient_name(self) -> str | None:
+        """Alias for customer_name (healthcare backward compatibility)."""
+        return self.customer_name
+
+    @patient_name.setter
+    def patient_name(self, value: str | None) -> None:
+        self.customer_name = value
+
+    @property
+    def patient_phone(self) -> str | None:
+        """Alias for customer_phone (healthcare backward compatibility)."""
+        return self.customer_phone
+
+    @patient_phone.setter
+    def patient_phone(self, value: str | None) -> None:
+        self.customer_phone = value
 
     # Dialect tracking for German regional variants
     detected_dialect: str | None = None  # de_standard, de_alemannic, de_bavarian, etc.
@@ -134,6 +152,11 @@ class ConversationEngine:
     - Conversation state
     - Turn-by-turn processing
     - Industry-specific logic (triage, etc.)
+
+    Multi-Tenant Support:
+    - Pass `industry` parameter to configure for different industries
+    - Each industry has its own system prompt, triage logic, etc.
+    - Supported industries: gesundheit, handwerk, gastro, freie_berufe
     """
 
     def __init__(
@@ -143,6 +166,8 @@ class ConversationEngine:
         tts: TextToSpeech | None = None,
         system_prompt: str | None = None,
         dialect_aware: bool = True,
+        industry: str | None = None,
+        language: str = "de",
     ) -> None:
         """Initialize conversation engine.
 
@@ -150,10 +175,28 @@ class ConversationEngine:
             stt: Speech-to-text engine (created if None)
             llm: Language model engine (created if None)
             tts: Text-to-speech engine (created if None)
-            system_prompt: Custom system prompt (uses healthcare default if None)
+            system_prompt: Custom system prompt (uses industry default if None)
             dialect_aware: Use dialect-aware STT for German variants (Schwäbisch, etc.)
+            industry: Industry name for multi-tenant support (gesundheit, handwerk, etc.)
+                      If None, uses config setting or defaults to gesundheit
+            language: Language code for prompts (de, tr, ru)
         """
         settings = get_settings()
+
+        # Determine industry from parameter, config, or default
+        if industry is None:
+            industry = getattr(settings, "industry", {})
+            if isinstance(industry, dict):
+                industry = industry.get("name", "gesundheit")
+            elif hasattr(industry, "name"):
+                industry = industry.name
+            else:
+                industry = "gesundheit"
+
+        # Initialize industry adapter for dynamic loading
+        self._industry_adapter = IndustryAdapter(industry, language)
+        self.industry = industry
+        self.language = language
 
         # Initialize AI components (lazy loaded)
         # Use DialectAwareSTT for German dialect support (Schwäbisch, Bavarian, etc.)
@@ -188,9 +231,16 @@ class ConversationEngine:
             model_path=settings.ai.tts.model_path,
         )
 
-        self.system_prompt = system_prompt or SYSTEM_PROMPT
+        # Use custom system prompt or get from industry adapter
+        self.system_prompt = system_prompt or self._industry_adapter.system_prompt
         self._conversations: dict[UUID, ConversationState] = {}
         self._dialect_aware = dialect_aware
+
+        log.info(
+            "ConversationEngine initialized",
+            industry=self.industry,
+            language=self.language,
+        )
 
     def preload_models(self) -> None:
         """Preload all AI models into memory.
@@ -209,6 +259,44 @@ class ConversationEngine:
         self.llm.unload()
         self.tts.unload()
         log.info("All models unloaded")
+
+    def _is_urgent_triage(self, triage_result: Any) -> bool:
+        """Check if triage result indicates urgency (industry-agnostic).
+
+        Different industries have different urgency indicators:
+        - Healthcare (gesundheit): level.value in ("akut", "dringend")
+        - Handwerk: urgency in ("notfall", "dringend")
+        - Others: Check various attributes
+
+        Args:
+            triage_result: Industry-specific triage/intake result
+
+        Returns:
+            True if the result indicates urgent action needed
+        """
+        if triage_result is None:
+            return False
+
+        # Healthcare: check level attribute
+        if hasattr(triage_result, "level"):
+            level = triage_result.level
+            if hasattr(level, "value"):
+                return level.value in ("akut", "dringend", "notfall")
+            return str(level).lower() in ("akut", "dringend", "notfall")
+
+        # Handwerk: check urgency attribute
+        if hasattr(triage_result, "urgency"):
+            urgency = triage_result.urgency
+            if hasattr(urgency, "value"):
+                return urgency.value in ("notfall", "dringend")
+            return str(urgency).lower() in ("notfall", "dringend")
+
+        # Generic: check is_urgent flag
+        if hasattr(triage_result, "is_urgent"):
+            return bool(triage_result.is_urgent)
+
+        # Default: not urgent
+        return False
 
     def start_conversation(self) -> ConversationState:
         """Start a new conversation.
@@ -329,14 +417,14 @@ Der Anrufer spricht {dialect_name}.
         )
         log.info("User said", text=user_text[:100])
 
-        # Triage check (healthcare specific)
-        triage_result = perform_triage(user_text)
-        if triage_result.level.value in ("akut", "dringend"):
+        # Triage/classification check (industry-specific)
+        triage_result = self._industry_adapter.perform_triage(user_text)
+        if triage_result and self._is_urgent_triage(triage_result):
             state.triage_result = triage_result
             log.warning(
                 "Triage alert",
-                level=triage_result.level.value,
-                reason=triage_result.reason,
+                industry=self.industry,
+                result=str(triage_result),
             )
 
         # LLM: Generate response with conversation history
@@ -381,9 +469,9 @@ Der Anrufer spricht {dialect_name}.
 
         state.add_turn(TurnRole.USER, text)
 
-        # Triage check
-        triage_result = perform_triage(text)
-        if triage_result.level.value in ("akut", "dringend"):
+        # Triage/classification check (industry-specific)
+        triage_result = self._industry_adapter.perform_triage(text)
+        if triage_result and self._is_urgent_triage(triage_result):
             state.triage_result = triage_result
 
         # Generate response with dialect-aware conversation history
@@ -399,18 +487,30 @@ Der Anrufer spricht {dialect_name}.
     async def generate_greeting(self, conversation_id: UUID) -> tuple[str, bytes]:
         """Generate initial greeting for a new call.
 
+        Uses industry-specific greeting template based on the configured industry.
+
         Args:
             conversation_id: Conversation to greet
 
         Returns:
             Tuple of (greeting_text, greeting_audio)
         """
-        from phone_agent.industry.gesundheit.workflows import get_time_of_day
+        from phone_agent.industry.prompt_loader import get_time_of_day
 
         time_of_day = await get_time_of_day()
-        settings = get_settings()
 
-        greeting = f"Guten {time_of_day}, Praxis, hier spricht der Telefonassistent. Wie kann ich Ihnen helfen?"
+        # Industry-specific greeting templates
+        greeting_templates = {
+            "gesundheit": f"Guten {time_of_day}, Praxis, hier spricht der Telefonassistent. Wie kann ich Ihnen helfen?",
+            "handwerk": f"Guten {time_of_day}, Handwerksbetrieb, hier spricht der Telefonassistent. Wie kann ich Ihnen helfen?",
+            "gastro": f"Guten {time_of_day}, Restaurant, hier spricht der Telefonassistent. Wie kann ich Ihnen helfen?",
+            "freie_berufe": f"Guten {time_of_day}, hier spricht der Telefonassistent. Wie kann ich Ihnen helfen?",
+        }
+
+        greeting = greeting_templates.get(
+            self.industry,
+            greeting_templates["freie_berufe"]  # Default fallback
+        )
 
         state = self._conversations.get(conversation_id)
         if state:
@@ -502,10 +602,10 @@ Der Anrufer spricht {dialect_name}.
         stt_time = time.time() - start_time
         log.info("Streaming: User said", text=user_text[:100], stt_time=f"{stt_time:.2f}s")
 
-        # === Triage (quick check for emergencies) ===
+        # === Triage (quick check for emergencies - industry-specific) ===
         triage_result = await asyncio.get_event_loop().run_in_executor(
             None,
-            lambda: perform_triage(user_text),
+            lambda: self._industry_adapter.perform_triage(user_text),
         )
 
         # === LLM + TTS Streaming Phase ===
