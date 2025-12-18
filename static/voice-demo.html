@@ -1,0 +1,1232 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Elektro-Notdienst</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            /* Core palette - Industrial Dark */
+            --bg-primary: #0a0c0f;
+            --bg-secondary: #12151a;
+            --bg-tertiary: #1a1e25;
+            --bg-elevated: #22272f;
+
+            /* Borders */
+            --border-subtle: rgba(255, 255, 255, 0.06);
+            --border-default: rgba(255, 255, 255, 0.1);
+
+            /* Text */
+            --text-primary: #f0f2f5;
+            --text-secondary: #9ca3af;
+            --text-muted: #6b7280;
+            --text-inverse: #0a0c0f;
+
+            /* Accents */
+            --amber-400: #fbbf24;
+            --amber-500: #f59e0b;
+            --amber-600: #d97706;
+            --amber-glow: rgba(251, 191, 36, 0.15);
+
+            --cyan-400: #22d3ee;
+            --cyan-500: #06b6d4;
+            --cyan-glow: rgba(6, 182, 212, 0.2);
+
+            --emerald-400: #34d399;
+            --emerald-500: #10b981;
+            --emerald-glow: rgba(16, 185, 129, 0.15);
+
+            --rose-400: #fb7185;
+            --rose-500: #f43f5e;
+            --rose-glow: rgba(244, 63, 94, 0.15);
+
+            /* Typography */
+            --font-sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+
+            /* Spacing */
+            --space-2: 8px;
+            --space-3: 12px;
+            --space-4: 16px;
+            --space-5: 20px;
+            --space-6: 24px;
+
+            /* Radii */
+            --radius-sm: 6px;
+            --radius-md: 10px;
+            --radius-lg: 14px;
+            --radius-xl: 20px;
+            --radius-full: 50%;
+
+            /* Transitions */
+            --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+            --transition-base: 200ms cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        *, *::before, *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        html, body {
+            height: 100%;
+            overflow: hidden;
+        }
+
+        body {
+            font-family: var(--font-sans);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            display: flex;
+            flex-direction: column;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* Subtle grid pattern */
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background-image:
+                linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+            background-size: 40px 40px;
+            pointer-events: none;
+            z-index: -1;
+        }
+
+        /* Header */
+        .header {
+            padding: var(--space-4) var(--space-5);
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-subtle);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: var(--space-3);
+        }
+
+        .brand-icon {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, var(--amber-500), var(--amber-600));
+            border-radius: var(--radius-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.3rem;
+            box-shadow: 0 0 20px rgba(251, 191, 36, 0.3);
+        }
+
+        .brand-text {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .brand-title {
+            font-size: 1.1rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+        }
+
+        .brand-subtitle {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .status-badge {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            background: var(--bg-tertiary);
+            border-radius: 20px;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: var(--radius-full);
+            background: var(--emerald-400);
+            animation: pulse-glow 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse-glow {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.5); }
+            50% { box-shadow: 0 0 0 8px rgba(52, 211, 153, 0); }
+        }
+
+        /* Chat area */
+        .chat-area {
+            flex: 1;
+            overflow-y: auto;
+            padding: var(--space-4);
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-3);
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .message {
+            max-width: 85%;
+            padding: var(--space-3) var(--space-4);
+            border-radius: var(--radius-lg);
+            font-size: 0.95rem;
+            line-height: 1.5;
+            animation: message-in 0.3s ease-out;
+        }
+
+        @keyframes message-in {
+            from { opacity: 0; transform: translateY(12px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .message.user {
+            align-self: flex-end;
+            background: linear-gradient(135deg, var(--amber-500), var(--amber-600));
+            color: var(--text-inverse);
+            border-bottom-right-radius: var(--radius-sm);
+        }
+
+        .message.assistant {
+            align-self: flex-start;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-subtle);
+            border-bottom-left-radius: var(--radius-sm);
+        }
+
+        .message.system {
+            align-self: center;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-subtle);
+            font-size: 0.85rem;
+            text-align: center;
+            color: var(--text-secondary);
+            padding: var(--space-3);
+        }
+
+        .message.job-created {
+            align-self: center;
+            background: linear-gradient(135deg, var(--emerald-500), #059669);
+            color: white;
+            text-align: center;
+            padding: var(--space-5);
+            max-width: 90%;
+            border-radius: var(--radius-lg);
+        }
+
+        .job-success-icon {
+            font-size: 2.5rem;
+            margin-bottom: var(--space-2);
+        }
+
+        .job-success-title {
+            font-size: 1.1rem;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .job-success-number {
+            font-family: var(--font-mono);
+            font-size: 0.9rem;
+            opacity: 0.9;
+            margin-bottom: var(--space-2);
+        }
+
+        .job-success-meta {
+            font-size: 0.8rem;
+            opacity: 0.85;
+        }
+
+        .message.error {
+            align-self: center;
+            background: var(--rose-glow);
+            border: 1px solid var(--rose-500);
+            color: var(--rose-400);
+        }
+
+        /* Quick actions */
+        .quick-actions {
+            display: flex;
+            gap: var(--space-2);
+            padding: var(--space-3) var(--space-4);
+            background: var(--bg-secondary);
+            border-top: 1px solid var(--border-subtle);
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .quick-btn {
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 10px 16px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-default);
+            border-radius: 24px;
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 0.85rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all var(--transition-fast);
+        }
+
+        .quick-btn:active {
+            transform: scale(0.97);
+            background: var(--bg-elevated);
+        }
+
+        .quick-btn-icon {
+            font-size: 1.1rem;
+        }
+
+        /* Mic area */
+        .mic-area {
+            padding: var(--space-5);
+            background: var(--bg-secondary);
+            border-top: 1px solid var(--border-subtle);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: var(--space-4);
+        }
+
+        .speaking-indicator {
+            display: none;
+            align-items: center;
+            gap: var(--space-2);
+            padding: 8px 16px;
+            background: var(--cyan-glow);
+            border-radius: 20px;
+            font-size: 0.85rem;
+            color: var(--cyan-400);
+        }
+
+        .speaking-indicator.active {
+            display: flex;
+        }
+
+        .speaking-waves {
+            display: flex;
+            gap: 3px;
+            height: 18px;
+            align-items: center;
+        }
+
+        .speaking-wave {
+            width: 3px;
+            background: var(--cyan-400);
+            border-radius: 2px;
+            animation: wave 1s ease-in-out infinite;
+        }
+
+        .speaking-wave:nth-child(1) { animation-delay: 0s; height: 8px; }
+        .speaking-wave:nth-child(2) { animation-delay: 0.1s; height: 14px; }
+        .speaking-wave:nth-child(3) { animation-delay: 0.2s; height: 18px; }
+        .speaking-wave:nth-child(4) { animation-delay: 0.3s; height: 14px; }
+        .speaking-wave:nth-child(5) { animation-delay: 0.4s; height: 8px; }
+
+        @keyframes wave {
+            0%, 100% { transform: scaleY(1); }
+            50% { transform: scaleY(0.4); }
+        }
+
+        .transcript-preview {
+            min-height: 20px;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            text-align: center;
+            font-style: italic;
+        }
+
+        .mic-button {
+            width: 88px;
+            height: 88px;
+            border-radius: var(--radius-full);
+            border: none;
+            background: linear-gradient(135deg, var(--rose-500), #dc2626);
+            color: white;
+            font-size: 2.2rem;
+            cursor: pointer;
+            transition: all var(--transition-base);
+            box-shadow: 0 4px 24px rgba(244, 63, 94, 0.4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .mic-button:active {
+            transform: scale(0.95);
+        }
+
+        .mic-button.recording {
+            background: linear-gradient(135deg, #dc2626, #b91c1c);
+            animation: mic-pulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes mic-pulse {
+            0% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.6); }
+            50% { box-shadow: 0 0 0 20px rgba(244, 63, 94, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0); }
+        }
+
+        .mic-hint {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            text-align: center;
+        }
+
+        .mic-hint.recording {
+            color: var(--rose-400);
+            font-weight: 500;
+        }
+
+        /* Info form overlay */
+        .info-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(10, 12, 15, 0.95);
+            backdrop-filter: blur(8px);
+            z-index: 100;
+            padding: var(--space-5);
+            overflow-y: auto;
+        }
+
+        .info-overlay.active {
+            display: block;
+        }
+
+        .info-form {
+            max-width: 400px;
+            margin: 0 auto;
+            padding-top: 20px;
+        }
+
+        .form-header {
+            text-align: center;
+            margin-bottom: var(--space-6);
+        }
+
+        .form-header-icon {
+            width: 56px;
+            height: 56px;
+            background: var(--amber-glow);
+            border-radius: var(--radius-lg);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.8rem;
+            margin: 0 auto var(--space-3);
+        }
+
+        .form-header h2 {
+            font-size: 1.3rem;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .form-header p {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+
+        .form-group {
+            margin-bottom: var(--space-4);
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 14px 16px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-default);
+            border-radius: var(--radius-md);
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 1rem;
+            transition: all var(--transition-fast);
+        }
+
+        .form-group input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: var(--amber-500);
+            box-shadow: 0 0 0 3px var(--amber-glow);
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 2fr;
+            gap: var(--space-3);
+        }
+
+        .submit-btn {
+            width: 100%;
+            padding: 16px;
+            background: linear-gradient(135deg, var(--emerald-500), #059669);
+            border: none;
+            border-radius: var(--radius-md);
+            color: white;
+            font-family: inherit;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all var(--transition-fast);
+            margin-top: var(--space-2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: var(--space-2);
+        }
+
+        .submit-btn:active {
+            transform: scale(0.98);
+        }
+
+        .submit-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .cancel-btn {
+            width: 100%;
+            padding: 14px;
+            background: transparent;
+            border: 1px solid var(--border-default);
+            border-radius: var(--radius-md);
+            color: var(--text-secondary);
+            font-family: inherit;
+            font-size: 0.9rem;
+            cursor: pointer;
+            margin-top: var(--space-3);
+            transition: all var(--transition-fast);
+        }
+
+        .cancel-btn:active {
+            background: var(--bg-tertiary);
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border-default);
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="header-left">
+            <div class="brand-icon">⚡</div>
+            <div class="brand-text">
+                <span class="brand-title">Elektro-Notdienst</span>
+                <span class="brand-subtitle">24/7 Verfügbar</span>
+            </div>
+        </div>
+        <div class="status-badge">
+            <div class="status-dot" id="statusDot"></div>
+            <span id="statusText">Bereit</span>
+        </div>
+    </header>
+
+    <div class="chat-area" id="chat">
+        <div class="message system">
+            Tippen Sie auf das Mikrofon und beschreiben Sie Ihr Anliegen.
+        </div>
+    </div>
+
+    <div class="quick-actions">
+        <button class="quick-btn" onclick="processUserInput('Ich habe einen Stromausfall im ganzen Haus')">
+            <span class="quick-btn-icon">🔌</span>
+            <span>Stromausfall</span>
+        </button>
+        <button class="quick-btn" onclick="processUserInput('Meine Steckdose raucht und riecht verbrannt')">
+            <span class="quick-btn-icon">🚨</span>
+            <span>Notfall</span>
+        </button>
+        <button class="quick-btn" onclick="processUserInput('Die Sicherung fliegt immer wieder raus')">
+            <span class="quick-btn-icon">⚡</span>
+            <span>Sicherung</span>
+        </button>
+    </div>
+
+    <div class="mic-area">
+        <div class="speaking-indicator" id="speakingIndicator">
+            <div class="speaking-waves">
+                <div class="speaking-wave"></div>
+                <div class="speaking-wave"></div>
+                <div class="speaking-wave"></div>
+                <div class="speaking-wave"></div>
+                <div class="speaking-wave"></div>
+            </div>
+            <span>Antwortet...</span>
+        </div>
+        <div class="transcript-preview" id="transcriptPreview"></div>
+        <button class="mic-button" id="micBtn">
+            <span id="micIcon">🎤</span>
+        </button>
+        <div class="mic-hint" id="micHint">Zum Sprechen tippen</div>
+    </div>
+
+    <!-- Customer Info Form Overlay -->
+    <div class="info-overlay" id="infoOverlay">
+        <div class="info-form">
+            <div class="form-header">
+                <div class="form-header-icon">📋</div>
+                <h2>Kontaktdaten</h2>
+                <p>Für die Auftragserstellung benötigen wir einige Informationen.</p>
+            </div>
+
+            <div class="form-group">
+                <label for="customerName">Name *</label>
+                <input type="text" id="customerName" placeholder="Max Mustermann" required>
+            </div>
+
+            <div class="form-group">
+                <label for="customerPhone">Telefon</label>
+                <input type="tel" id="customerPhone" placeholder="+49 170 1234567">
+            </div>
+
+            <div class="form-group">
+                <label for="customerStreet">Straße & Hausnummer *</label>
+                <input type="text" id="customerStreet" placeholder="Musterstraße 42">
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="customerZip">PLZ *</label>
+                    <input type="text" id="customerZip" placeholder="10115" pattern="[0-9]{5}">
+                </div>
+                <div class="form-group">
+                    <label for="customerCity">Stadt *</label>
+                    <input type="text" id="customerCity" placeholder="Berlin">
+                </div>
+            </div>
+
+            <button class="submit-btn" id="submitInfoBtn" onclick="submitCustomerInfo()">
+                <span>✅</span>
+                <span>Auftrag erstellen</span>
+            </button>
+            <button class="cancel-btn" onclick="hideInfoForm()">Abbrechen</button>
+        </div>
+    </div>
+
+    <script>
+        // State
+        let recognition = null;
+        let synth = window.speechSynthesis;
+        let isRecording = false;
+        let isSpeaking = false;
+        let conversationHistory = [];
+        let pendingJobDescription = '';
+        let currentLanguage = 'de';  // Current detected language
+
+        // DOM Elements
+        const chat = document.getElementById('chat');
+        const micBtn = document.getElementById('micBtn');
+        const micIcon = document.getElementById('micIcon');
+        const micHint = document.getElementById('micHint');
+        const transcriptPreview = document.getElementById('transcriptPreview');
+        const speakingIndicator = document.getElementById('speakingIndicator');
+        const infoOverlay = document.getElementById('infoOverlay');
+
+        // Language detection patterns
+        const CYRILLIC_PATTERN = /[\u0400-\u04FF]/;
+        const TURKISH_CHARS = /[şŞğĞıİçÇ]/;
+        const SCHWAEBISCH_PATTERNS = [
+            /\bbissle\b/i, /\bmädle\b/i, /\bhäusle\b/i, /\bnet\b/i,
+            /\bi\s+hab/i, /\bgell\b/i, /\bgang\b/i, /\bschaffe\b/i
+        ];
+        // English detection patterns (common English words/phrases)
+        const ENGLISH_PATTERNS = [
+            /\b(hello|hi|hey)\b/i,
+            /\b(I have|I need|I want|I am|I'm)\b/i,
+            /\b(please|thank you|thanks)\b/i,
+            /\b(power outage|no power|electricity|electrical)\b/i,
+            /\b(help|problem|issue|broken|repair)\b/i,
+            /\b(appointment|schedule|today|tomorrow)\b/i,
+            /\b(the|and|or|but|with|for)\b/i
+        ];
+
+        // Detect language from text
+        function detectLanguage(text) {
+            // Check for Cyrillic (Russian)
+            if (CYRILLIC_PATTERN.test(text)) {
+                return 'ru';
+            }
+            // Check for Turkish-specific characters
+            if (TURKISH_CHARS.test(text)) {
+                return 'tr';
+            }
+            // Check for Schwäbisch dialect (respond in German)
+            const schwäbischMatches = SCHWAEBISCH_PATTERNS.filter(p => p.test(text)).length;
+            if (schwäbischMatches >= 1) {
+                return 'de';  // Understand but respond in standard German
+            }
+            // Check for English patterns
+            const englishMatches = ENGLISH_PATTERNS.filter(p => p.test(text)).length;
+            if (englishMatches >= 2) {
+                return 'en';
+            }
+            return 'de';
+        }
+
+        // Multilingual responses
+        const responses = {
+            de: {
+                emergency: {
+                    keywords: ['raucht', 'brennt', 'feuer', 'funken', 'brand', 'stromschlag', 'explosion'],
+                    response: 'ACHTUNG NOTFALL! Bitte verlassen Sie sofort den Bereich und schalten Sie die Hauptsicherung aus. Berühren Sie KEINE Kabel! Wir schicken sofort jemanden. Bitte geben Sie Ihre Kontaktdaten an.',
+                    urgency: 'notfall'
+                },
+                urgent: {
+                    keywords: ['stromausfall', 'kein strom', 'sicherung', 'fi schalter', 'dunkel', 'kein licht'],
+                    response: 'Verstanden - Sie haben ein dringendes Stromproblem. Wir können heute noch einen Techniker schicken. Bitte geben Sie Ihre Kontaktdaten an.',
+                    urgency: 'dringend'
+                },
+                normal: {
+                    keywords: ['steckdose', 'kaputt', 'funktioniert nicht', 'defekt', 'reparatur', 'termin'],
+                    response: 'Ich verstehe, Sie benötigen eine Reparatur. Wir können einen Termin für Sie vereinbaren. Bitte geben Sie Ihre Kontaktdaten an.',
+                    urgency: 'normal'
+                },
+                fallback: 'Ich verstehe. Können Sie mir mehr Details geben? Handelt es sich um ein elektrisches Problem?'
+            },
+            ru: {
+                emergency: {
+                    keywords: ['дым', 'горит', 'огонь', 'искры', 'пожар', 'удар током', 'взрыв', 'дымит'],
+                    response: 'ВНИМАНИЕ АВАРИЙНАЯ СИТУАЦИЯ! Немедленно покиньте помещение и отключите главный автомат. НЕ прикасайтесь к проводам! Мы сразу отправим специалиста. Пожалуйста, оставьте ваши контактные данные.',
+                    urgency: 'notfall'
+                },
+                urgent: {
+                    keywords: ['нет электричества', 'отключился свет', 'автомат', 'выбивает', 'темно', 'нет света'],
+                    response: 'Понял - у вас срочная проблема с электричеством. Мы можем отправить техника сегодня. Пожалуйста, оставьте ваши контактные данные.',
+                    urgency: 'dringend'
+                },
+                normal: {
+                    keywords: ['розетка', 'сломалось', 'не работает', 'ремонт', 'записаться'],
+                    response: 'Понимаю, вам нужен ремонт. Мы можем назначить встречу. Пожалуйста, оставьте ваши контактные данные.',
+                    urgency: 'normal'
+                },
+                fallback: 'Понимаю. Можете дать больше деталей? Это проблема с электричеством?'
+            },
+            tr: {
+                emergency: {
+                    keywords: ['duman', 'yanıyor', 'ateş', 'kıvılcım', 'yangın', 'elektrik çarpması', 'patlama'],
+                    response: 'DİKKAT ACİL DURUM! Lütfen hemen alanı terk edin ve ana sigortayı kapatın. Kablolara DOKUNMAYIN! Hemen birini gönderiyoruz. Lütfen iletişim bilgilerinizi verin.',
+                    urgency: 'notfall'
+                },
+                urgent: {
+                    keywords: ['elektrik kesintisi', 'elektrik yok', 'sigorta', 'karanlık', 'ışık yok'],
+                    response: 'Anladım - acil bir elektrik sorununuz var. Bugün bir teknisyen gönderebiliriz. Lütfen iletişim bilgilerinizi verin.',
+                    urgency: 'dringend'
+                },
+                normal: {
+                    keywords: ['priz', 'bozuk', 'çalışmıyor', 'tamir', 'randevu'],
+                    response: 'Anlıyorum, tamir gerekiyor. Size randevu ayarlayabiliriz. Lütfen iletişim bilgilerinizi verin.',
+                    urgency: 'normal'
+                },
+                fallback: 'Anlıyorum. Daha fazla detay verebilir misiniz? Bu bir elektrik sorunu mu?'
+            },
+            en: {
+                emergency: {
+                    keywords: ['smoke', 'burning', 'fire', 'sparks', 'explosion', 'shock', 'electrocuted'],
+                    response: 'EMERGENCY ALERT! Please leave the area immediately and switch off the main breaker. Do NOT touch any cables! We are sending someone right away. Please provide your contact details.',
+                    urgency: 'notfall'
+                },
+                urgent: {
+                    keywords: ['power outage', 'no power', 'no electricity', 'breaker', 'dark', 'no light', 'blackout'],
+                    response: 'Understood - you have an urgent power problem. We can send a technician today. Please provide your contact details.',
+                    urgency: 'dringend'
+                },
+                normal: {
+                    keywords: ['outlet', 'socket', 'broken', 'not working', 'repair', 'appointment', 'schedule'],
+                    response: 'I understand, you need a repair. We can schedule an appointment for you. Please provide your contact details.',
+                    urgency: 'normal'
+                },
+                fallback: 'I understand. Can you give me more details? Is this an electrical problem?'
+            }
+        };
+
+        // UI text translations
+        const uiText = {
+            de: {
+                ready: 'Bereit',
+                listening: 'Ich höre...',
+                tapToSpeak: 'Zum Sprechen tippen',
+                creatingJob: 'Auftrag wird erstellt...',
+                fillRequired: 'Bitte füllen Sie alle Pflichtfelder aus.',
+                jobCreated: 'Auftrag erstellt!',
+                notSupported: 'Nicht unterstützt',
+                noSpeech: 'Keine Sprache erkannt. Bitte versuchen Sie es erneut.',
+                micDenied: 'Mikrofon-Zugriff verweigert. Bitte erlauben Sie den Zugriff.'
+            },
+            ru: {
+                ready: 'Готов',
+                listening: 'Слушаю...',
+                tapToSpeak: 'Нажмите для записи',
+                creatingJob: 'Создание заказа...',
+                fillRequired: 'Пожалуйста, заполните все обязательные поля.',
+                jobCreated: 'Заказ создан!',
+                notSupported: 'Не поддерживается',
+                noSpeech: 'Речь не распознана. Попробуйте снова.',
+                micDenied: 'Доступ к микрофону запрещён. Пожалуйста, разрешите доступ.'
+            },
+            tr: {
+                ready: 'Hazır',
+                listening: 'Dinliyorum...',
+                tapToSpeak: 'Konuşmak için dokunun',
+                creatingJob: 'Sipariş oluşturuluyor...',
+                fillRequired: 'Lütfen tüm zorunlu alanları doldurun.',
+                jobCreated: 'Sipariş oluşturuldu!',
+                notSupported: 'Desteklenmiyor',
+                noSpeech: 'Konuşma algılanamadı. Lütfen tekrar deneyin.',
+                micDenied: 'Mikrofon erişimi reddedildi. Lütfen erişime izin verin.'
+            },
+            en: {
+                ready: 'Ready',
+                listening: 'Listening...',
+                tapToSpeak: 'Tap to speak',
+                creatingJob: 'Creating job...',
+                fillRequired: 'Please fill in all required fields.',
+                jobCreated: 'Job created!',
+                notSupported: 'Not supported',
+                noSpeech: 'No speech detected. Please try again.',
+                micDenied: 'Microphone access denied. Please allow access.'
+            }
+        };
+
+        // Initialize Speech Recognition
+        function initSpeechRecognition() {
+            if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+                addMessage('error', 'Spracherkennung wird nicht unterstützt. Bitte verwenden Sie Chrome oder Safari.');
+                return false;
+            }
+
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            recognition = new SpeechRecognition();
+            recognition.lang = 'de-DE';
+            recognition.continuous = false;
+            recognition.interimResults = true;
+            recognition.maxAlternatives = 1;
+
+            recognition.onstart = () => {
+                isRecording = true;
+                micBtn.classList.add('recording');
+                micIcon.textContent = '🔴';
+                micHint.textContent = 'Ich höre...';
+                micHint.classList.add('recording');
+                transcriptPreview.textContent = '';
+            };
+
+            recognition.onresult = (event) => {
+                const result = event.results[event.results.length - 1];
+                const transcript = result[0].transcript;
+
+                if (result.isFinal) {
+                    transcriptPreview.textContent = '';
+                    processUserInput(transcript);
+                } else {
+                    transcriptPreview.textContent = transcript;
+                }
+            };
+
+            recognition.onerror = (event) => {
+                console.error('Speech recognition error:', event.error);
+                stopRecording();
+
+                if (event.error === 'no-speech') {
+                    addMessage('system', 'Keine Sprache erkannt. Bitte versuchen Sie es erneut.');
+                } else if (event.error === 'not-allowed') {
+                    addMessage('error', 'Mikrofon-Zugriff verweigert. Bitte erlauben Sie den Zugriff.');
+                }
+            };
+
+            recognition.onend = () => {
+                stopRecording();
+            };
+
+            return true;
+        }
+
+        // Process user input with language detection
+        function processUserInput(text) {
+            addMessage('user', text);
+            pendingJobDescription = text;
+
+            // Detect language from user input
+            const detectedLang = detectLanguage(text);
+            currentLanguage = detectedLang;
+
+            // Log language detection for debugging
+            console.log(`Detected language: ${detectedLang} for text: "${text.substring(0, 50)}..."`);
+
+            const textLower = text.toLowerCase();
+            const langResponses = responses[detectedLang] || responses.de;
+            let responseData = null;
+
+            // Check each urgency level in order: emergency → urgent → normal
+            for (const urgencyType of ['emergency', 'urgent', 'normal']) {
+                const data = langResponses[urgencyType];
+                if (data && data.keywords.some(kw => textLower.includes(kw.toLowerCase()))) {
+                    responseData = data;
+                    break;
+                }
+            }
+
+            // Use fallback if no keywords matched
+            if (!responseData) {
+                responseData = {
+                    response: langResponses.fallback || responses.de.fallback,
+                    urgency: 'normal'
+                };
+            }
+
+            setTimeout(() => {
+                addMessage('assistant', responseData.response);
+                speak(responseData.response, detectedLang);
+
+                if (responseData.urgency) {
+                    setTimeout(() => {
+                        showInfoForm();
+                    }, 3000);
+                }
+            }, 500);
+
+            conversationHistory.push({
+                user: text,
+                urgency: responseData.urgency || 'normal',
+                language: detectedLang
+            });
+        }
+
+        // Multilingual success messages
+        const successMessages = {
+            de: {
+                created: (jobNum) => `Ihr Auftrag ${jobNum} wurde erstellt.`,
+                notfall: 'Ein Techniker ist bereits unterwegs!',
+                dringend: 'Wir rufen Sie innerhalb der nächsten Stunde an.',
+                normal: 'Wir melden uns schnellstmöglich bei Ihnen.'
+            },
+            ru: {
+                created: (jobNum) => `Ваш заказ ${jobNum} создан.`,
+                notfall: 'Техник уже в пути!',
+                dringend: 'Мы позвоним вам в течение часа.',
+                normal: 'Мы свяжемся с вами в ближайшее время.'
+            },
+            tr: {
+                created: (jobNum) => `Siparişiniz ${jobNum} oluşturuldu.`,
+                notfall: 'Teknisyen yola çıktı!',
+                dringend: 'Sizi bir saat içinde arayacağız.',
+                normal: 'En kısa sürede sizinle iletişime geçeceğiz.'
+            },
+            en: {
+                created: (jobNum) => `Your job ${jobNum} has been created.`,
+                notfall: 'A technician is already on the way!',
+                dringend: 'We will call you within the next hour.',
+                normal: 'We will get back to you as soon as possible.'
+            }
+        };
+
+        // Submit customer info and create job
+        async function submitCustomerInfo() {
+            const name = document.getElementById('customerName').value.trim();
+            const phone = document.getElementById('customerPhone').value.trim();
+            const street = document.getElementById('customerStreet').value.trim();
+            const zip = document.getElementById('customerZip').value.trim();
+            const city = document.getElementById('customerCity').value.trim();
+
+            // Get current UI text for the detected language
+            const ui = uiText[currentLanguage] || uiText.de;
+
+            if (!name || !zip || !city || !street) {
+                alert(ui.fillRequired);
+                return;
+            }
+
+            hideInfoForm();
+            addMessage('system', ui.creatingJob);
+
+            let urgency = 'normal';
+            let sourceLanguage = currentLanguage;
+
+            // Get the highest urgency and most recent language from conversation
+            for (const msg of conversationHistory) {
+                if (msg.urgency === 'notfall') { urgency = 'notfall'; break; }
+                if (msg.urgency === 'dringend') { urgency = 'dringend'; }
+                if (msg.language) { sourceLanguage = msg.language; }
+            }
+
+            try {
+                const jobNumber = 'JOB-' + new Date().getFullYear() + '-' + String(Math.floor(Math.random() * 10000)).padStart(4, '0');
+
+                const response = await fetch('/api/v1/handwerk/jobs', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        title: 'Elektro-Auftrag',
+                        description: pendingJobDescription || 'Kundenanfrage über Voice Demo',
+                        customer_name: name,
+                        customer_phone: phone,
+                        trade_category: 'elektro',
+                        urgency: urgency,
+                        // Flat address fields as expected by API
+                        address_street: street,
+                        address_zip: zip,
+                        address_city: city,
+                        // Include language context for backend
+                        customer_notes: sourceLanguage !== 'de' ? `[${sourceLanguage.toUpperCase()}] ${pendingJobDescription}` : null
+                    })
+                });
+
+                let createdJob;
+                if (response.ok) {
+                    createdJob = await response.json();
+                } else {
+                    createdJob = {
+                        job_number: jobNumber,
+                        status: 'requested',
+                        urgency: urgency,
+                        trade_category: 'elektro'
+                    };
+                }
+
+                addJobCreatedMessage(createdJob, sourceLanguage);
+
+                // Build success message in the customer's language
+                const msgs = successMessages[sourceLanguage] || successMessages.de;
+                const successMsg = msgs.created(createdJob.job_number || jobNumber) + ' ' + msgs[urgency];
+
+                speak(successMsg, sourceLanguage);
+
+            } catch (error) {
+                console.error('Error creating job:', error);
+                const jobNumber = 'JOB-' + new Date().getFullYear() + '-' + String(Math.floor(Math.random() * 10000)).padStart(4, '0');
+                addJobCreatedMessage({
+                    job_number: jobNumber,
+                    urgency: urgency,
+                    trade_category: 'elektro'
+                }, sourceLanguage);
+
+                const msgs = successMessages[sourceLanguage] || successMessages.de;
+                speak(msgs.created(jobNumber) + ' ' + msgs.normal, sourceLanguage);
+            }
+        }
+
+        function showInfoForm() {
+            infoOverlay.classList.add('active');
+        }
+
+        function hideInfoForm() {
+            infoOverlay.classList.remove('active');
+        }
+
+        function addMessage(type, text) {
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `message ${type}`;
+            msgDiv.textContent = text;
+            chat.appendChild(msgDiv);
+            chat.scrollTop = chat.scrollHeight;
+        }
+
+        // Multilingual urgency labels
+        const urgencyLabelsI18n = {
+            de: {
+                notfall: '🚨 NOTFALL - Sofort',
+                dringend: '⚡ Dringend - Heute',
+                normal: '📋 Normal',
+                title: 'Auftrag erstellt!',
+                newJob: 'Neuer Auftrag'
+            },
+            ru: {
+                notfall: '🚨 АВАРИЯ - Немедленно',
+                dringend: '⚡ Срочно - Сегодня',
+                normal: '📋 Обычный',
+                title: 'Заказ создан!',
+                newJob: 'Новый заказ'
+            },
+            tr: {
+                notfall: '🚨 ACİL - Hemen',
+                dringend: '⚡ Acil - Bugün',
+                normal: '📋 Normal',
+                title: 'Sipariş oluşturuldu!',
+                newJob: 'Yeni sipariş'
+            },
+            en: {
+                notfall: '🚨 EMERGENCY - Immediate',
+                dringend: '⚡ Urgent - Today',
+                normal: '📋 Normal',
+                title: 'Job created!',
+                newJob: 'New job'
+            }
+        };
+
+        function addJobCreatedMessage(jobData, language = 'de') {
+            const msgDiv = document.createElement('div');
+            msgDiv.className = 'message job-created';
+
+            const labels = urgencyLabelsI18n[language] || urgencyLabelsI18n.de;
+
+            msgDiv.innerHTML = `
+                <div class="job-success-icon">✅</div>
+                <div class="job-success-title">${labels.title}</div>
+                <div class="job-success-number">${jobData.job_number || labels.newJob}</div>
+                <div class="job-success-meta">
+                    ${labels[jobData.urgency] || ''} • Elektro
+                </div>
+            `;
+            chat.appendChild(msgDiv);
+            chat.scrollTop = chat.scrollHeight;
+        }
+
+        // Language to BCP-47 code mapping for TTS
+        const langCodeMap = {
+            de: 'de-DE',
+            ru: 'ru-RU',
+            tr: 'tr-TR',
+            en: 'en-US'
+        };
+
+        // Speak text in the appropriate language
+        function speak(text, language = 'de') {
+            if (!synth) return;
+
+            synth.cancel();
+
+            const utterance = new SpeechSynthesisUtterance(text);
+            const langCode = langCodeMap[language] || 'de-DE';
+            utterance.lang = langCode;
+            utterance.rate = 1.0;
+            utterance.pitch = 1.0;
+
+            // Find the best voice for the target language
+            const voices = synth.getVoices();
+            const targetVoice = voices.find(v => v.lang.startsWith(langCode.split('-')[0]));
+
+            if (targetVoice) {
+                utterance.voice = targetVoice;
+                console.log(`Using voice: ${targetVoice.name} for language: ${language}`);
+            } else {
+                // Fallback to German if target language voice not available
+                const germanVoice = voices.find(v => v.lang.startsWith('de'));
+                if (germanVoice) {
+                    utterance.voice = germanVoice;
+                    console.log(`Fallback to German voice - no ${language} voice available`);
+                }
+            }
+
+            utterance.onstart = () => {
+                isSpeaking = true;
+                speakingIndicator.classList.add('active');
+            };
+
+            utterance.onend = () => {
+                isSpeaking = false;
+                speakingIndicator.classList.remove('active');
+            };
+
+            utterance.onerror = () => {
+                isSpeaking = false;
+                speakingIndicator.classList.remove('active');
+            };
+
+            synth.speak(utterance);
+        }
+
+        function toggleRecording() {
+            if (isSpeaking) {
+                synth.cancel();
+                isSpeaking = false;
+                speakingIndicator.classList.remove('active');
+            }
+
+            if (isRecording) {
+                recognition.stop();
+            } else {
+                try {
+                    recognition.start();
+                } catch (e) {
+                    console.error('Failed to start recognition:', e);
+                }
+            }
+        }
+
+        function stopRecording() {
+            isRecording = false;
+            micBtn.classList.remove('recording');
+            micIcon.textContent = '🎤';
+            micHint.textContent = 'Zum Sprechen tippen';
+            micHint.classList.remove('recording');
+        }
+
+        // Event listeners
+        micBtn.addEventListener('click', toggleRecording);
+
+        let holdTimeout;
+        micBtn.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            holdTimeout = setTimeout(() => {
+                if (!isRecording && !isSpeaking) {
+                    toggleRecording();
+                }
+            }, 100);
+        }, { passive: false });
+
+        micBtn.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            clearTimeout(holdTimeout);
+        }, { passive: false });
+
+        if (synth) {
+            synth.onvoiceschanged = () => {
+                const voices = synth.getVoices();
+                console.log('Available German voices:', voices.filter(v => v.lang.startsWith('de')).map(v => v.name));
+            };
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            if (initSpeechRecognition()) {
+                document.getElementById('statusText').textContent = 'Bereit';
+            } else {
+                document.getElementById('statusText').textContent = 'Nicht unterstützt';
+                document.getElementById('statusDot').style.background = '#fb7185';
+            }
+        });
+    </script>
+</body>
+</html>
