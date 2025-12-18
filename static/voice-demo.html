@@ -940,28 +940,41 @@
             };
 
             recognition.onend = () => {
-                console.log('Speech recognition ended');
+                console.log('=== RECOGNITION ENDED, isSpeaking:', isSpeaking, 'continuousListening:', continuousListening);
                 stopRecording();
 
-                // Auto-restart in continuous mode if conversation is active
-                // Don't restart if: form is showing, speaking, or user stopped manually
+                // Auto-restart in continuous mode - use polling to wait for TTS to finish
                 if (continuousListening && conversationActive &&
-                    !isSpeaking && !infoOverlay.classList.contains('active')) {
+                    !infoOverlay.classList.contains('active')) {
 
-                    // Small delay before restart to avoid rapid cycling
-                    setTimeout(() => {
+                    // Polling function that waits for isSpeaking=false
+                    const tryRestart = () => {
+                        console.log('=== TRY RESTART, isSpeaking:', isSpeaking);
+
+                        // If still speaking, wait and try again
+                        if (isSpeaking) {
+                            setTimeout(tryRestart, 200);
+                            return;
+                        }
+
+                        // Now safe to restart
                         if (continuousListening && conversationActive &&
-                            !isRecording && !isSpeaking &&
-                            !infoOverlay.classList.contains('active')) {
+                            !isRecording && !infoOverlay.classList.contains('active')) {
                             try {
                                 recognition.start();
-                                console.log('Auto-restarted continuous listening');
+                                console.log('=== AUTO-RESTARTED continuous listening');
                             } catch (e) {
-                                console.log('Auto-restart skipped:', e.message);
-                                // Don't kill conversation on error - user can tap mic to continue
+                                console.log('=== RESTART FAILED:', e.message);
                             }
+                        } else {
+                            console.log('=== RESTART SKIPPED, conditions not met');
                         }
-                    }, 300);
+                    };
+
+                    // Start polling after a short delay
+                    setTimeout(tryRestart, 300);
+                } else {
+                    console.log('=== NO RESTART, continuous mode inactive or blocked');
                 }
             };
 
@@ -1049,10 +1062,9 @@
             }
         }
 
-        // Stop listening (user explicitly stopping)
-        function stopListening() {
-            continuousListening = false;
-
+        // Pause recognition without killing continuous mode
+        // Used for TTS playback and form display
+        function pauseRecognition() {
             if (recognitionRestartTimeout) {
                 clearTimeout(recognitionRestartTimeout);
                 recognitionRestartTimeout = null;
@@ -1065,6 +1077,14 @@
                     // Ignore errors when stopping
                 }
             }
+        }
+
+        // Full stop - user explicitly stopped listening
+        function stopListening() {
+            console.log('=== STOP LISTENING (user action)');
+            continuousListening = false;
+            conversationActive = false;
+            pauseRecognition();
         }
 
         // Process user input with language detection and conversation flow
@@ -1161,8 +1181,14 @@
             // Cancel any ongoing speech
             stopSpeaking();
 
-            // Pause recognition during TTS to avoid feedback
-            // (will resume in handleTTSComplete)
+            // CRITICAL: Set isSpeaking=true BEFORE stopping recognition
+            // This prevents recognition.onend from trying to restart during TTS
+            isSpeaking = true;
+            speakingIndicator.classList.add('active');
+            updateStatus('speaking');
+            console.log('=== TTS STARTING, pausing recognition');
+
+            // NOW pause recognition (onend will see isSpeaking=true and wait)
             if (recognition && isRecording) {
                 try {
                     recognition.stop();
@@ -1172,34 +1198,20 @@
                 }
             }
 
-            isSpeaking = true;
-            speakingIndicator.classList.add('active');
-            updateStatus('speaking');
-
-            // Helper to handle completion and resume listening
+            // Helper to handle completion - recognition.onend handles restart
             const handleTTSComplete = () => {
+                console.log('=== TTS COMPLETE, setting isSpeaking=false');
                 isSpeaking = false;
                 speakingIndicator.classList.remove('active');
 
                 // Execute callback (may show form)
                 if (onComplete) onComplete();
 
-                // Resume continuous listening if still active
-                // recognition.onend handler will auto-restart in continuous mode
+                // Just update status - recognition.onend's polling will restart
+                // when it sees isSpeaking=false
                 if (continuousListening && conversationActive &&
                     !infoOverlay.classList.contains('active')) {
                     updateStatus('listening');
-                    // Give a brief pause before resuming to avoid picking up TTS echo
-                    setTimeout(() => {
-                        if (continuousListening && conversationActive && !isRecording) {
-                            try {
-                                recognition.start();
-                                console.log('Resumed listening after TTS');
-                            } catch (e) {
-                                console.log('Resume skipped:', e.message);
-                            }
-                        }
-                    }, 300);
                 } else {
                     updateStatus('ready');
                 }
@@ -1398,19 +1410,38 @@
         }
 
         function showInfoForm() {
-            // Stop listening when form is shown but keep conversation state
-            // so user can continue after closing form
-            stopListening();
-            // Don't set conversationActive = false - this killed auto-listen
+            console.log('=== SHOWING FORM, pausing recognition');
+            // Pause recognition (NOT stop) - keep continuous mode active
+            pauseRecognition();
+            // Keep conversationActive and continuousListening true
+            // so conversation can resume after form is closed
             infoOverlay.classList.add('active');
             updateStatus('ready');
         }
 
         function hideInfoForm() {
+            console.log('=== HIDING FORM, continuousListening:', continuousListening);
             infoOverlay.classList.remove('active');
-            // Reset conversation state to allow new conversation
-            resetConversationState();
-            updateStatus('ready');
+
+            // Resume listening if conversation was still active
+            if (continuousListening && conversationActive) {
+                console.log('=== RESUMING LISTENING after form closed');
+                setTimeout(() => {
+                    if (!isRecording && !isSpeaking) {
+                        try {
+                            recognition.start();
+                            updateStatus('listening');
+                        } catch (e) {
+                            console.log('Resume after form failed:', e.message);
+                            updateStatus('ready');
+                        }
+                    }
+                }, 300);
+            } else {
+                // User had stopped conversation before form, reset
+                resetConversationState();
+                updateStatus('ready');
+            }
         }
 
         function resetConversationState() {
