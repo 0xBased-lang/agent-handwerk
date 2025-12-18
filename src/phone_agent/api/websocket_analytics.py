@@ -40,6 +40,7 @@ class ConnectionManager:
             "dashboard": set(),
             "calls": set(),
             "health": set(),
+            "jobs": set(),  # For real-time job updates to admin dashboard
         }
         self._running = False
         self._broadcast_tasks: dict[str, asyncio.Task] = {}
@@ -441,6 +442,69 @@ async def websocket_health(websocket: WebSocket):
         manager.disconnect(websocket, "health")
 
 
+@router.websocket("/jobs")
+async def websocket_jobs(websocket: WebSocket):
+    """WebSocket endpoint for real-time job updates.
+
+    Admin dashboard connects here to receive instant notifications
+    when jobs are created, updated, or status changes.
+
+    Message format:
+    {
+        "type": "job_created|job_updated|job_deleted",
+        "timestamp": "2024-01-15T10:30:00Z",
+        "job_number": "JOB-2024-0001",
+        "urgency": "notfall|dringend|normal|routine",
+        "trade_category": "elektro|shk|schlosser|...",
+        "description": "Short description...",
+        "customer_name": "Max Mustermann"
+    }
+    """
+    await manager.connect(websocket, "jobs")
+
+    try:
+        # Send welcome message with connection count
+        await websocket.send_json({
+            "type": "connected",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "message": "Connected to job updates",
+            "active_connections": manager.get_connection_count("jobs"),
+        })
+
+        # Keep connection alive and handle client messages
+        while True:
+            try:
+                data = await asyncio.wait_for(
+                    websocket.receive_text(),
+                    timeout=60.0,  # 60s timeout
+                )
+
+                # Handle ping/pong
+                if data == "ping":
+                    await websocket.send_text("pong")
+                elif data:
+                    try:
+                        msg = json.loads(data)
+                        if msg.get("type") == "pong":
+                            pass  # Client responding to our ping
+                    except json.JSONDecodeError:
+                        pass
+
+            except asyncio.TimeoutError:
+                # Send keepalive ping
+                try:
+                    await websocket.send_json({"type": "ping"})
+                except Exception:
+                    break
+
+    except WebSocketDisconnect:
+        logger.info("Jobs WebSocket client disconnected")
+    except Exception as e:
+        logger.error(f"Jobs WebSocket error: {e}")
+    finally:
+        manager.disconnect(websocket, "jobs")
+
+
 # ============================================================================
 # Event Broadcasting (called from other parts of the system)
 # ============================================================================
@@ -480,6 +544,25 @@ async def broadcast_kpi_update(kpis: dict[str, Any]) -> None:
         "type": "kpi_update",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "data": kpis,
+    })
+
+
+async def broadcast_job_event(
+    event_type: str,
+    job_data: dict[str, Any],
+) -> None:
+    """Broadcast a job event to all connected admin dashboard clients.
+
+    Call this from chat handlers when jobs are created or updated.
+
+    Args:
+        event_type: Type of event (job_created, job_updated, job_deleted)
+        job_data: Job data including job_number, urgency, trade_category, etc.
+    """
+    await manager.broadcast("jobs", {
+        "type": event_type,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        **job_data,
     })
 
 

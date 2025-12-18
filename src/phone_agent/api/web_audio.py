@@ -578,3 +578,130 @@ async def list_sessions() -> dict[str, Any]:
         "active_sessions": handler.active_sessions,
         "session_ids": [str(sid) for sid in handler.session_ids],
     }
+
+
+class TTSRequest(BaseModel):
+    """TTS request model."""
+    text: str
+    language: str = "de"
+
+
+# TTS singleton for reuse
+_tts_engine: Any = None
+_tts_type: str = "none"
+
+
+def get_tts_engine() -> tuple[Any, str]:
+    """Get or create TTS engine (ElevenLabs or Piper fallback)."""
+    global _tts_engine, _tts_type
+
+    if _tts_engine is not None:
+        return _tts_engine, _tts_type
+
+    import os
+
+    # Try ElevenLabs first (better quality)
+    elevenlabs_key = os.environ.get("ELEVENLABS_API_KEY", "")
+    if elevenlabs_key:
+        try:
+            from phone_agent.ai.cloud.elevenlabs_client import ElevenLabsTTS
+            _tts_engine = ElevenLabsTTS(
+                api_key=elevenlabs_key,
+                model="eleven_flash_v2_5",  # Low latency model
+            )
+            _tts_type = "elevenlabs"
+            log.info("TTS initialized with ElevenLabs")
+            return _tts_engine, _tts_type
+        except Exception as e:
+            log.warning(f"Failed to initialize ElevenLabs TTS: {e}")
+
+    # Fallback to Piper (local)
+    try:
+        from phone_agent.ai.tts import TextToSpeech
+        _tts_engine = TextToSpeech()
+        _tts_type = "piper"
+        log.info("TTS initialized with Piper (local)")
+        return _tts_engine, _tts_type
+    except Exception as e:
+        log.warning(f"Failed to initialize Piper TTS: {e}")
+
+    return None, "none"
+
+
+@router.post("/tts")
+async def synthesize_speech(request: TTSRequest):
+    """Synthesize speech from text.
+
+    Uses ElevenLabs (if configured) or Piper TTS for high-quality
+    natural-sounding German voice synthesis.
+
+    Returns audio in the best format for the TTS engine used.
+    """
+    from fastapi.responses import Response
+
+    tts, tts_type = get_tts_engine()
+
+    if tts is None:
+        return Response(
+            content=b"",
+            media_type="audio/mpeg",
+            headers={"X-TTS-Error": "No TTS engine available"}
+        )
+
+    try:
+        # Set language if supported
+        if hasattr(tts, 'set_language'):
+            tts.set_language(request.language)
+
+        # Synthesize based on TTS engine type
+        if tts_type == "elevenlabs":
+            # ElevenLabs: Get raw MP3 directly without conversion
+            # This avoids the ffmpeg dependency
+            if not tts._loaded:
+                tts.load(request.language)
+
+            audio_generator = tts._client.text_to_speech.convert(
+                voice_id=tts.voice_id,
+                text=request.text,
+                model_id=tts.model,
+                output_format="mp3_22050_32",
+            )
+
+            # Collect audio chunks
+            audio_chunks = []
+            for chunk in audio_generator:
+                if chunk:
+                    audio_chunks.append(chunk)
+
+            audio_bytes = b"".join(audio_chunks)
+
+            return Response(
+                content=audio_bytes,
+                media_type="audio/mpeg",
+                headers={
+                    "X-TTS-Engine": tts_type,
+                    "X-TTS-Language": request.language,
+                    "Cache-Control": "public, max-age=3600",
+                }
+            )
+        else:
+            # Piper returns WAV
+            audio_bytes = await tts.synthesize_async(request.text, output_format="wav", language=request.language)
+
+            return Response(
+                content=audio_bytes,
+                media_type="audio/wav",
+                headers={
+                    "X-TTS-Engine": tts_type,
+                    "X-TTS-Language": request.language,
+                    "Cache-Control": "public, max-age=3600",
+                }
+            )
+
+    except Exception as e:
+        log.error(f"TTS synthesis failed: {e}")
+        return Response(
+            content=b"",
+            media_type="audio/mpeg",
+            headers={"X-TTS-Error": str(e)}
+        )

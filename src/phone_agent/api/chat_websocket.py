@@ -21,8 +21,12 @@ from itf_shared import get_logger
 from phone_agent.db import get_db
 from phone_agent.db.repositories import ContactRepository, JobRepository
 from phone_agent.services.handwerk_service import HandwerkService
-from phone_agent.industry.handwerk.prompts import CHAT_SYSTEM_PROMPT
 from phone_agent.ai.llm import LanguageModel
+from phone_agent.api.websocket_analytics import broadcast_job_event
+from phone_agent.services.language_context import (
+    ConversationLanguageManager,
+    MultilingualPromptSelector,
+)
 
 log = get_logger(__name__)
 
@@ -48,7 +52,7 @@ class ChatMessage(BaseModel):
 
 
 class ChatSession:
-    """Manages a chat session."""
+    """Manages a chat session with multilingual support."""
 
     def __init__(self, session_id: str):
         self.session_id = session_id
@@ -61,12 +65,36 @@ class ChatSession:
         self.trade_category: str | None = None
         self.urgency: str | None = None
 
-        # Initialize conversation with chat system prompt
-        self.messages = [{"role": "system", "content": CHAT_SYSTEM_PROMPT}]
+        # Multilingual support
+        self.language_manager = ConversationLanguageManager()
+        self.prompt_selector = MultilingualPromptSelector("handwerk")
+        self.current_language = "de"  # Default German
+        self.source_language = "de"  # Language customer spoke in (for translation)
+
+        # Initialize conversation with German system prompt (will be updated on first message)
+        system_prompt = self.prompt_selector.get_system_prompt("de")
+        self.messages = [{"role": "system", "content": system_prompt}]
 
     def add_message(self, role: str, content: str):
         """Add message to conversation history."""
         self.messages.append({"role": role, "content": content})
+
+    def _update_system_prompt_for_language(self, language: str) -> None:
+        """Update system prompt when language changes.
+
+        Args:
+            language: New language code (de, ru, tr)
+        """
+        if language != self.current_language:
+            log.info(
+                "Language switch detected",
+                session=self.session_id,
+                from_lang=self.current_language,
+                to_lang=language,
+            )
+            self.current_language = language
+            new_prompt = self.prompt_selector.get_system_prompt(language)
+            self.messages[0] = {"role": "system", "content": new_prompt}
 
     async def process_message(
         self,
@@ -75,6 +103,8 @@ class ChatSession:
     ) -> str:
         """Process user message and get LLM response.
 
+        Detects language per message and switches prompts accordingly.
+
         Args:
             user_message: User's text message
             llm: LLM instance (optional, uses mock if not provided)
@@ -82,6 +112,25 @@ class ChatSession:
         Returns:
             AI response text
         """
+        # Detect language from user message
+        lang_info = self.language_manager.process_message(user_message)
+        response_lang = lang_info.response_language
+
+        # Track source language for job creation translation
+        self.source_language = lang_info.detected_language
+
+        # Update system prompt if language changed
+        self._update_system_prompt_for_language(response_lang)
+
+        log.debug(
+            "Message language detected",
+            session=self.session_id,
+            detected=lang_info.detected_language,
+            response_lang=response_lang,
+            is_dialect=lang_info.is_dialect,
+            confidence=lang_info.confidence,
+        )
+
         self.add_message("user", user_message)
 
         if llm and llm.is_loaded:
@@ -95,10 +144,16 @@ class ChatSession:
                 ai_response = ai_response.strip()
             except Exception as e:
                 log.error("LLM error", session=self.session_id, error=str(e))
-                ai_response = "Entschuldigung, es gab einen Fehler. Können Sie das bitte wiederholen?"
+                ai_response = self.prompt_selector.get_error_message(response_lang)
         else:
             # Mock response for testing (when LLM not loaded)
-            ai_response = f"Ich verstehe. Sie haben gesagt: '{user_message}'. Wie kann ich Ihnen weiter helfen?"
+            mock_responses = {
+                "de": f"Ich verstehe. Sie haben gesagt: '{user_message}'. Wie kann ich Ihnen weiter helfen?",
+                "ru": f"Понимаю. Вы сказали: '{user_message}'. Чем ещё могу помочь?",
+                "tr": f"Anlıyorum. Dediniz ki: '{user_message}'. Başka nasıl yardımcı olabilirim?",
+                "en": f"I understand. You said: '{user_message}'. How else can I help you?",
+            }
+            ai_response = mock_responses.get(response_lang, mock_responses["de"])
 
         self.add_message("assistant", ai_response)
         return ai_response
@@ -222,11 +277,17 @@ async def chat_handwerk(
     log.info("Chat session started", session_id=session_id)
 
     try:
-        # Send welcome message
+        # Send welcome message (German initially - will switch based on customer's language)
+        welcome_messages = {
+            "de": "Willkommen! Ich bin Ihr Handwerker-Assistent. Wie kann ich Ihnen helfen?",
+            "ru": "Добро пожаловать! Я ваш помощник по ремонту. Чем могу помочь?",
+            "tr": "Hoş geldiniz! Ben sizin usta asistanınızım. Size nasıl yardımcı olabilirim?",
+            "en": "Welcome! I'm your trades assistant. How can I help you?",
+        }
         await websocket.send_json({
             "type": MessageType.MESSAGE.value,
-            "text": "Willkommen! Ich bin Ihr Handwerker-Assistent. Wie kann ich Ihnen helfen?",
-            "data": {"session_id": session_id},
+            "text": welcome_messages["de"],  # Start with German
+            "data": {"session_id": session_id, "language": "de"},
         })
 
         # Main chat loop
@@ -250,18 +311,26 @@ async def chat_handwerk(
                     session.trade_category = job_info["trade_category"]
                     session.urgency = job_info["urgency"]
 
-                # Send response
+                # Send response with language info
                 await websocket.send_json({
                     "type": MessageType.MESSAGE.value,
                     "text": ai_response,
+                    "data": {"language": session.current_language},
                 })
 
-                # If we don't have customer info yet, request it
+                # If we don't have customer info yet, request it (in detected language)
                 if not session.customer_name:
                     await asyncio.sleep(0.5)
+                    info_request_messages = {
+                        "de": "Um Ihnen zu helfen, benötige ich noch einige Informationen. Wie ist Ihr Name?",
+                        "ru": "Чтобы помочь вам, мне нужна некоторая информация. Как вас зовут?",
+                        "tr": "Size yardımcı olabilmem için bazı bilgilere ihtiyacım var. Adınız nedir?",
+                        "en": "To help you, I need some information. What is your name?",
+                    }
                     await websocket.send_json({
                         "type": MessageType.INFO_REQUEST.value,
-                        "text": "Um Ihnen zu helfen, benötige ich noch einige Informationen. Wie ist Ihr Name?",
+                        "text": info_request_messages.get(session.current_language, info_request_messages["de"]),
+                        "data": {"language": session.current_language},
                     })
 
             elif message_type == "provide_info":
@@ -277,14 +346,21 @@ async def chat_handwerk(
 
                 # Check if we can create job now
                 if session.is_ready_for_job_creation():
-                    # Send confirmation message
+                    # Send confirmation message in customer's language
+                    confirmation_messages = {
+                        "de": f"Vielen Dank, {session.customer_name}! Ihr Auftrag wird bearbeitet.",
+                        "ru": f"Спасибо, {session.customer_name}! Ваш заказ обрабатывается.",
+                        "tr": f"Teşekkürler, {session.customer_name}! Siparişiniz işleniyor.",
+                        "en": f"Thank you, {session.customer_name}! Your job is being processed.",
+                    }
                     await websocket.send_json({
                         "type": MessageType.MESSAGE.value,
-                        "text": f"Vielen Dank, {session.customer_name}! Ihr Auftrag wird bearbeitet.",
+                        "text": confirmation_messages.get(session.current_language, confirmation_messages["de"]),
+                        "data": {"language": session.current_language},
                     })
 
                     try:
-                        # Create job using HandwerkService
+                        # Create job using HandwerkService (with translation to German)
                         job_result = await handwerk_service.create_job_from_intake(
                             customer_name=session.customer_name,
                             description=session.job_description or "Neuer Auftrag",
@@ -293,6 +369,7 @@ async def chat_handwerk(
                             customer_phone=session.customer_phone,
                             address=session.customer_address,
                             session_id=session_id,
+                            source_language=session.source_language,  # For translation
                         )
 
                         # Commit the transaction
@@ -318,20 +395,47 @@ async def chat_handwerk(
                             customer=session.customer_name,
                         )
 
+                        # Broadcast to admin dashboard for real-time updates
+                        await broadcast_job_event(
+                            event_type="job_created",
+                            job_data={
+                                "job_number": job_result["job_number"],
+                                "job_id": job_result["job_id"],
+                                "urgency": job_result["urgency"],
+                                "trade_category": job_result["trade_category"],
+                                "description": session.job_description[:100] if session.job_description else "",
+                                "customer_name": session.customer_name,
+                                "status": job_result["status"],
+                            },
+                        )
+
                     except Exception as e:
                         # Rollback on error
                         await db.rollback()
                         log.error("Job creation failed", session=session_id, error=str(e))
+                        error_messages = {
+                            "de": "Entschuldigung, es gab einen Fehler beim Erstellen des Auftrags. Bitte versuchen Sie es erneut.",
+                            "ru": "Извините, произошла ошибка при создании заказа. Пожалуйста, попробуйте ещё раз.",
+                            "tr": "Özür dileriz, sipariş oluşturulurken bir hata oluştu. Lütfen tekrar deneyin.",
+                            "en": "Sorry, there was an error creating the job. Please try again.",
+                        }
                         await websocket.send_json({
                             "type": MessageType.ERROR.value,
-                            "text": "Entschuldigung, es gab einen Fehler beim Erstellen des Auftrags. Bitte versuchen Sie es erneut.",
+                            "text": error_messages.get(session.current_language, error_messages["de"]),
                         })
                 else:
-                    # Request more info
+                    # Request more info (in detected language)
                     if not session.customer_address:
+                        address_request_messages = {
+                            "de": "Bitte geben Sie Ihre Adresse an (PLZ und Stadt).",
+                            "ru": "Пожалуйста, укажите ваш адрес (почтовый индекс и город).",
+                            "tr": "Lütfen adresinizi belirtin (posta kodu ve şehir).",
+                            "en": "Please provide your address (zip code and city).",
+                        }
                         await websocket.send_json({
                             "type": MessageType.INFO_REQUEST.value,
-                            "text": "Bitte geben Sie Ihre Adresse an (PLZ und Stadt).",
+                            "text": address_request_messages.get(session.current_language, address_request_messages["de"]),
+                            "data": {"language": session.current_language},
                         })
 
             else:

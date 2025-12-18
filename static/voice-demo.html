@@ -656,6 +656,9 @@
         let conversationHistory = [];
         let pendingJobDescription = '';
         let currentLanguage = 'de';  // Current detected language
+        let conversationTurns = 0;   // Track number of exchanges
+        let readyForJobCreation = false;  // Only show form when explicitly ready
+        let formShownThisSession = false; // Don't show form multiple times
 
         // DOM Elements
         const chat = document.getElementById('chat');
@@ -707,79 +710,109 @@
             return 'de';
         }
 
-        // Multilingual responses
+        // Multilingual responses - conversation flow with initial inquiry and follow-up
         const responses = {
             de: {
                 emergency: {
                     keywords: ['raucht', 'brennt', 'feuer', 'funken', 'brand', 'stromschlag', 'explosion'],
-                    response: 'ACHTUNG NOTFALL! Bitte verlassen Sie sofort den Bereich und schalten Sie die Hauptsicherung aus. Berühren Sie KEINE Kabel! Wir schicken sofort jemanden. Bitte geben Sie Ihre Kontaktdaten an.',
-                    urgency: 'notfall'
+                    // First response asks for more info, follow-up offers job creation
+                    initial: 'ACHTUNG! Das klingt nach einem Notfall. Sind Sie in Sicherheit? Haben Sie die Hauptsicherung bereits ausgeschaltet?',
+                    followup: 'Verstanden. Wir schicken sofort einen Techniker. Ich brauche nur noch Ihre Kontaktdaten.',
+                    urgency: 'notfall',
+                    showFormAfterTurns: 1  // Show form after 1 turn for emergencies
                 },
                 urgent: {
                     keywords: ['stromausfall', 'kein strom', 'sicherung', 'fi schalter', 'dunkel', 'kein licht'],
-                    response: 'Verstanden - Sie haben ein dringendes Stromproblem. Wir können heute noch einen Techniker schicken. Bitte geben Sie Ihre Kontaktdaten an.',
-                    urgency: 'dringend'
+                    initial: 'Verstanden - Sie haben ein Stromproblem. Betrifft es das ganze Haus oder nur bestimmte Räume?',
+                    followup: 'Alles klar. Wir können heute noch einen Techniker schicken. Darf ich Ihre Kontaktdaten aufnehmen?',
+                    urgency: 'dringend',
+                    showFormAfterTurns: 2
                 },
                 normal: {
                     keywords: ['steckdose', 'kaputt', 'funktioniert nicht', 'defekt', 'reparatur', 'termin'],
-                    response: 'Ich verstehe, Sie benötigen eine Reparatur. Wir können einen Termin für Sie vereinbaren. Bitte geben Sie Ihre Kontaktdaten an.',
-                    urgency: 'normal'
+                    initial: 'Ich verstehe, Sie haben ein elektrisches Problem. Können Sie mir mehr dazu erzählen? Seit wann besteht das Problem?',
+                    followup: 'Danke für die Details. Wir können einen Termin für Sie vereinbaren. Darf ich Ihre Kontaktdaten aufnehmen?',
+                    urgency: 'normal',
+                    showFormAfterTurns: 2
                 },
-                fallback: 'Ich verstehe. Können Sie mir mehr Details geben? Handelt es sich um ein elektrisches Problem?'
+                fallback: 'Ich verstehe. Können Sie mir mehr Details geben? Handelt es sich um ein elektrisches Problem?',
+                // Generic follow-up when problem is understood
+                genericFollowup: 'Danke für die Information. Sollen wir einen Techniker schicken? Ich bräuchte dann Ihre Kontaktdaten.'
             },
             ru: {
                 emergency: {
                     keywords: ['дым', 'горит', 'огонь', 'искры', 'пожар', 'удар током', 'взрыв', 'дымит'],
-                    response: 'ВНИМАНИЕ АВАРИЙНАЯ СИТУАЦИЯ! Немедленно покиньте помещение и отключите главный автомат. НЕ прикасайтесь к проводам! Мы сразу отправим специалиста. Пожалуйста, оставьте ваши контактные данные.',
-                    urgency: 'notfall'
+                    initial: 'ВНИМАНИЕ! Это звучит как аварийная ситуация. Вы в безопасности? Вы уже отключили главный автомат?',
+                    followup: 'Понял. Мы сразу отправим техника. Мне нужны только ваши контактные данные.',
+                    urgency: 'notfall',
+                    showFormAfterTurns: 1
                 },
                 urgent: {
                     keywords: ['нет электричества', 'отключился свет', 'автомат', 'выбивает', 'темно', 'нет света'],
-                    response: 'Понял - у вас срочная проблема с электричеством. Мы можем отправить техника сегодня. Пожалуйста, оставьте ваши контактные данные.',
-                    urgency: 'dringend'
+                    initial: 'Понял - у вас проблема с электричеством. Это касается всего дома или только некоторых комнат?',
+                    followup: 'Понятно. Мы можем отправить техника сегодня. Могу я записать ваши контактные данные?',
+                    urgency: 'dringend',
+                    showFormAfterTurns: 2
                 },
                 normal: {
                     keywords: ['розетка', 'сломалось', 'не работает', 'ремонт', 'записаться'],
-                    response: 'Понимаю, вам нужен ремонт. Мы можем назначить встречу. Пожалуйста, оставьте ваши контактные данные.',
-                    urgency: 'normal'
+                    initial: 'Понимаю, у вас проблема с электрикой. Расскажите подробнее. Когда это началось?',
+                    followup: 'Спасибо за информацию. Мы можем назначить встречу. Могу я записать ваши контактные данные?',
+                    urgency: 'normal',
+                    showFormAfterTurns: 2
                 },
-                fallback: 'Понимаю. Можете дать больше деталей? Это проблема с электричеством?'
+                fallback: 'Понимаю. Можете дать больше деталей? Это проблема с электричеством?',
+                genericFollowup: 'Спасибо за информацию. Хотите, чтобы мы отправили техника? Тогда мне нужны ваши контактные данные.'
             },
             tr: {
                 emergency: {
                     keywords: ['duman', 'yanıyor', 'ateş', 'kıvılcım', 'yangın', 'elektrik çarpması', 'patlama'],
-                    response: 'DİKKAT ACİL DURUM! Lütfen hemen alanı terk edin ve ana sigortayı kapatın. Kablolara DOKUNMAYIN! Hemen birini gönderiyoruz. Lütfen iletişim bilgilerinizi verin.',
-                    urgency: 'notfall'
+                    initial: 'DİKKAT! Bu acil bir durum gibi görünüyor. Güvende misiniz? Ana sigortayı kapattınız mı?',
+                    followup: 'Anladım. Hemen bir teknisyen gönderiyoruz. Sadece iletişim bilgilerinize ihtiyacım var.',
+                    urgency: 'notfall',
+                    showFormAfterTurns: 1
                 },
                 urgent: {
                     keywords: ['elektrik kesintisi', 'elektrik yok', 'sigorta', 'karanlık', 'ışık yok'],
-                    response: 'Anladım - acil bir elektrik sorununuz var. Bugün bir teknisyen gönderebiliriz. Lütfen iletişim bilgilerinizi verin.',
-                    urgency: 'dringend'
+                    initial: 'Anladım - elektrik sorununuz var. Tüm evi mi etkiliyor yoksa sadece bazı odaları mı?',
+                    followup: 'Tamam. Bugün bir teknisyen gönderebiliriz. İletişim bilgilerinizi alabilir miyim?',
+                    urgency: 'dringend',
+                    showFormAfterTurns: 2
                 },
                 normal: {
                     keywords: ['priz', 'bozuk', 'çalışmıyor', 'tamir', 'randevu'],
-                    response: 'Anlıyorum, tamir gerekiyor. Size randevu ayarlayabiliriz. Lütfen iletişim bilgilerinizi verin.',
-                    urgency: 'normal'
+                    initial: 'Anlıyorum, elektrikle ilgili bir sorununuz var. Daha fazla bilgi verebilir misiniz? Ne zamandan beri var?',
+                    followup: 'Bilgi için teşekkürler. Size randevu ayarlayabiliriz. İletişim bilgilerinizi alabilir miyim?',
+                    urgency: 'normal',
+                    showFormAfterTurns: 2
                 },
-                fallback: 'Anlıyorum. Daha fazla detay verebilir misiniz? Bu bir elektrik sorunu mu?'
+                fallback: 'Anlıyorum. Daha fazla detay verebilir misiniz? Bu bir elektrik sorunu mu?',
+                genericFollowup: 'Bilgi için teşekkürler. Teknisyen göndermemizi ister misiniz? O zaman iletişim bilgilerinize ihtiyacım var.'
             },
             en: {
                 emergency: {
                     keywords: ['smoke', 'burning', 'fire', 'sparks', 'explosion', 'shock', 'electrocuted'],
-                    response: 'EMERGENCY ALERT! Please leave the area immediately and switch off the main breaker. Do NOT touch any cables! We are sending someone right away. Please provide your contact details.',
-                    urgency: 'notfall'
+                    initial: 'ALERT! This sounds like an emergency. Are you safe? Have you switched off the main breaker?',
+                    followup: 'Understood. We will send someone immediately. I just need your contact details.',
+                    urgency: 'notfall',
+                    showFormAfterTurns: 1
                 },
                 urgent: {
                     keywords: ['power outage', 'no power', 'no electricity', 'breaker', 'dark', 'no light', 'blackout'],
-                    response: 'Understood - you have an urgent power problem. We can send a technician today. Please provide your contact details.',
-                    urgency: 'dringend'
+                    initial: 'Understood - you have a power problem. Is it affecting the whole house or just certain rooms?',
+                    followup: 'Got it. We can send a technician today. May I take your contact details?',
+                    urgency: 'dringend',
+                    showFormAfterTurns: 2
                 },
                 normal: {
                     keywords: ['outlet', 'socket', 'broken', 'not working', 'repair', 'appointment', 'schedule'],
-                    response: 'I understand, you need a repair. We can schedule an appointment for you. Please provide your contact details.',
-                    urgency: 'normal'
+                    initial: 'I understand, you have an electrical issue. Can you tell me more? When did this start?',
+                    followup: 'Thanks for the details. We can schedule an appointment. May I take your contact details?',
+                    urgency: 'normal',
+                    showFormAfterTurns: 2
                 },
-                fallback: 'I understand. Can you give me more details? Is this an electrical problem?'
+                fallback: 'I understand. Can you give me more details? Is this an electrical problem?',
+                genericFollowup: 'Thanks for the information. Would you like us to send a technician? I would need your contact details.'
             }
         };
 
@@ -884,10 +917,16 @@
             return true;
         }
 
-        // Process user input with language detection
+        // Process user input with language detection and conversation flow
         function processUserInput(text) {
             addMessage('user', text);
-            pendingJobDescription = text;
+
+            // Accumulate job description across turns
+            if (pendingJobDescription) {
+                pendingJobDescription += ' | ' + text;
+            } else {
+                pendingJobDescription = text;
+            }
 
             // Detect language from user input
             const detectedLang = detectLanguage(text);
@@ -895,10 +934,12 @@
 
             // Log language detection for debugging
             console.log(`Detected language: ${detectedLang} for text: "${text.substring(0, 50)}..."`);
+            console.log(`Conversation turn: ${conversationTurns + 1}, readyForJobCreation: ${readyForJobCreation}`);
 
             const textLower = text.toLowerCase();
             const langResponses = responses[detectedLang] || responses.de;
             let responseData = null;
+            let responseText = '';
 
             // Check each urgency level in order: emergency → urgent → normal
             for (const urgencyType of ['emergency', 'urgent', 'normal']) {
@@ -909,30 +950,135 @@
                 }
             }
 
-            // Use fallback if no keywords matched
-            if (!responseData) {
-                responseData = {
-                    response: langResponses.fallback || responses.de.fallback,
-                    urgency: 'normal'
-                };
+            // Increment conversation turn
+            conversationTurns++;
+
+            // Determine which response to give based on conversation state
+            if (responseData) {
+                const turnsNeeded = responseData.showFormAfterTurns || 2;
+
+                if (conversationTurns >= turnsNeeded && !formShownThisSession) {
+                    // Ready to show form - use followup response
+                    responseText = responseData.followup;
+                    readyForJobCreation = true;
+                } else {
+                    // Still gathering info - use initial response
+                    responseText = responseData.initial;
+                }
+            } else {
+                // No keywords matched
+                if (conversationTurns >= 2 && !formShownThisSession) {
+                    // After 2+ turns, offer to create job
+                    responseText = langResponses.genericFollowup || langResponses.fallback;
+                    readyForJobCreation = true;
+                } else {
+                    // Ask for more details
+                    responseText = langResponses.fallback;
+                }
             }
 
-            setTimeout(() => {
-                addMessage('assistant', responseData.response);
-                speak(responseData.response, detectedLang);
-
-                if (responseData.urgency) {
-                    setTimeout(() => {
-                        showInfoForm();
-                    }, 3000);
-                }
-            }, 500);
-
+            // Store conversation context
             conversationHistory.push({
                 user: text,
-                urgency: responseData.urgency || 'normal',
+                urgency: responseData?.urgency || 'normal',
                 language: detectedLang
             });
+
+            // Show response and speak it
+            setTimeout(() => {
+                addMessage('assistant', responseText);
+
+                // Speak the response, then optionally show form after TTS completes
+                speakWithCallback(responseText, detectedLang, () => {
+                    // Only show form if ready and not already shown
+                    if (readyForJobCreation && !formShownThisSession) {
+                        // Small delay after TTS completes before showing form
+                        setTimeout(() => {
+                            showInfoForm();
+                            formShownThisSession = true;
+                        }, 500);
+                    }
+                });
+            }, 500);
+        }
+
+        // Speak with callback when finished (for conversation flow)
+        function speakWithCallback(text, language, onComplete) {
+            // Cancel any ongoing speech
+            stopSpeaking();
+
+            isSpeaking = true;
+            speakingIndicator.classList.add('active');
+
+            // Try backend TTS first
+            fetch('/api/v1/audio/tts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: text, language: language })
+            })
+            .then(response => {
+                if (!response.ok) throw new Error('TTS failed');
+                return response.blob();
+            })
+            .then(audioBlob => {
+                if (audioBlob.size === 0) throw new Error('Empty audio');
+
+                const audioUrl = URL.createObjectURL(audioBlob);
+                currentAudioElement = new Audio(audioUrl);
+
+                currentAudioElement.onended = () => {
+                    isSpeaking = false;
+                    speakingIndicator.classList.remove('active');
+                    URL.revokeObjectURL(audioUrl);
+                    currentAudioElement = null;
+                    if (onComplete) onComplete();
+                };
+
+                currentAudioElement.onerror = () => {
+                    isSpeaking = false;
+                    speakingIndicator.classList.remove('active');
+                    URL.revokeObjectURL(audioUrl);
+                    currentAudioElement = null;
+                    // Fallback to browser TTS
+                    fallbackSpeakWithCallback(text, language, onComplete);
+                };
+
+                currentAudioElement.play();
+            })
+            .catch(() => {
+                // Fallback to browser TTS
+                fallbackSpeakWithCallback(text, language, onComplete);
+            });
+        }
+
+        // Fallback browser TTS with callback
+        function fallbackSpeakWithCallback(text, language, onComplete) {
+            if (!synth) {
+                isSpeaking = false;
+                speakingIndicator.classList.remove('active');
+                if (onComplete) onComplete();
+                return;
+            }
+
+            const langCodeMap = { de: 'de-DE', ru: 'ru-RU', tr: 'tr-TR', en: 'en-US' };
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = langCodeMap[language] || 'de-DE';
+            utterance.rate = 1.0;
+            utterance.pitch = 1.0;
+
+            utterance.onend = () => {
+                isSpeaking = false;
+                speakingIndicator.classList.remove('active');
+                if (onComplete) onComplete();
+            };
+
+            utterance.onerror = () => {
+                isSpeaking = false;
+                speakingIndicator.classList.remove('active');
+                if (onComplete) onComplete();
+            };
+
+            synth.speak(utterance);
         }
 
         // Multilingual success messages
@@ -1034,6 +1180,9 @@
 
                 speak(successMsg, sourceLanguage);
 
+                // Reset for new conversation after job creation
+                setTimeout(() => fullConversationReset(), 2000);
+
             } catch (error) {
                 console.error('Error creating job:', error);
                 const jobNumber = 'JOB-' + new Date().getFullYear() + '-' + String(Math.floor(Math.random() * 10000)).padStart(4, '0');
@@ -1045,6 +1194,9 @@
 
                 const msgs = successMessages[sourceLanguage] || successMessages.de;
                 speak(msgs.created(jobNumber) + ' ' + msgs.normal, sourceLanguage);
+
+                // Reset for new conversation after job creation
+                setTimeout(() => fullConversationReset(), 2000);
             }
         }
 
@@ -1054,6 +1206,25 @@
 
         function hideInfoForm() {
             infoOverlay.classList.remove('active');
+            // Reset conversation state to allow new conversation
+            resetConversationState();
+        }
+
+        function resetConversationState() {
+            conversationTurns = 0;
+            readyForJobCreation = false;
+            // Note: Don't reset formShownThisSession here - that prevents re-showing during same session
+            // Reset pendingJobDescription for new conversations
+            pendingJobDescription = '';
+        }
+
+        // Full reset for starting completely fresh (e.g., after job submission)
+        function fullConversationReset() {
+            conversationTurns = 0;
+            readyForJobCreation = false;
+            formShownThisSession = false;
+            pendingJobDescription = '';
+            conversationHistory = [];
         }
 
         function addMessage(type, text) {
@@ -1114,19 +1285,107 @@
             chat.scrollTop = chat.scrollHeight;
         }
 
-        // Language to BCP-47 code mapping for TTS
-        const langCodeMap = {
-            de: 'de-DE',
-            ru: 'ru-RU',
-            tr: 'tr-TR',
-            en: 'en-US'
-        };
+        // TTS Audio element for backend TTS playback
+        let currentAudioElement = null;
 
-        // Speak text in the appropriate language
-        function speak(text, language = 'de') {
-            if (!synth) return;
+        // Speak text using backend TTS API (high-quality natural voice)
+        async function speak(text, language = 'de') {
+            // Cancel any ongoing speech
+            stopSpeaking();
 
-            synth.cancel();
+            isSpeaking = true;
+            speakingIndicator.classList.add('active');
+
+            try {
+                // Call backend TTS endpoint
+                const response = await fetch('/api/v1/audio/tts', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        text: text,
+                        language: language
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`TTS request failed: ${response.status}`);
+                }
+
+                const ttsEngine = response.headers.get('X-TTS-Engine') || 'unknown';
+                const contentType = response.headers.get('Content-Type') || 'audio/mpeg';
+                console.log(`Using TTS engine: ${ttsEngine} (${contentType}) for language: ${language}`);
+
+                // Get audio data as blob
+                const audioBlob = await response.blob();
+
+                if (audioBlob.size === 0) {
+                    console.warn('Empty TTS response, falling back to browser TTS');
+                    fallbackSpeak(text, language);
+                    return;
+                }
+
+                // Create audio URL and play with Audio element
+                // This handles both MP3 (ElevenLabs) and WAV (Piper) formats
+                const audioUrl = URL.createObjectURL(audioBlob);
+                currentAudioElement = new Audio(audioUrl);
+
+                currentAudioElement.onended = () => {
+                    isSpeaking = false;
+                    speakingIndicator.classList.remove('active');
+                    URL.revokeObjectURL(audioUrl);
+                    currentAudioElement = null;
+                };
+
+                currentAudioElement.onerror = (e) => {
+                    console.error('Audio playback error:', e);
+                    isSpeaking = false;
+                    speakingIndicator.classList.remove('active');
+                    URL.revokeObjectURL(audioUrl);
+                    currentAudioElement = null;
+                    fallbackSpeak(text, language);
+                };
+
+                await currentAudioElement.play();
+
+            } catch (error) {
+                console.error('Backend TTS failed, falling back to browser TTS:', error);
+                fallbackSpeak(text, language);
+            }
+        }
+
+        // Stop any currently playing TTS audio
+        function stopSpeaking() {
+            if (currentAudioElement) {
+                try {
+                    currentAudioElement.pause();
+                    currentAudioElement.currentTime = 0;
+                } catch (e) {}
+                currentAudioElement = null;
+            }
+            // Also stop browser TTS if it was used as fallback
+            if (synth) {
+                synth.cancel();
+            }
+            isSpeaking = false;
+            speakingIndicator.classList.remove('active');
+        }
+
+        // Fallback to browser TTS if backend fails
+        function fallbackSpeak(text, language = 'de') {
+            if (!synth) {
+                isSpeaking = false;
+                speakingIndicator.classList.remove('active');
+                return;
+            }
+
+            const langCodeMap = {
+                de: 'de-DE',
+                ru: 'ru-RU',
+                tr: 'tr-TR',
+                en: 'en-US'
+            };
 
             const utterance = new SpeechSynthesisUtterance(text);
             const langCode = langCodeMap[language] || 'de-DE';
@@ -1134,26 +1393,11 @@
             utterance.rate = 1.0;
             utterance.pitch = 1.0;
 
-            // Find the best voice for the target language
             const voices = synth.getVoices();
             const targetVoice = voices.find(v => v.lang.startsWith(langCode.split('-')[0]));
-
             if (targetVoice) {
                 utterance.voice = targetVoice;
-                console.log(`Using voice: ${targetVoice.name} for language: ${language}`);
-            } else {
-                // Fallback to German if target language voice not available
-                const germanVoice = voices.find(v => v.lang.startsWith('de'));
-                if (germanVoice) {
-                    utterance.voice = germanVoice;
-                    console.log(`Fallback to German voice - no ${language} voice available`);
-                }
             }
-
-            utterance.onstart = () => {
-                isSpeaking = true;
-                speakingIndicator.classList.add('active');
-            };
 
             utterance.onend = () => {
                 isSpeaking = false;
@@ -1170,9 +1414,7 @@
 
         function toggleRecording() {
             if (isSpeaking) {
-                synth.cancel();
-                isSpeaking = false;
-                speakingIndicator.classList.remove('active');
+                stopSpeaking();
             }
 
             if (isRecording) {
