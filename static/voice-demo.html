@@ -659,6 +659,11 @@
         let conversationTurns = 0;   // Track number of exchanges
         let readyForJobCreation = false;  // Only show form when explicitly ready
         let formShownThisSession = false; // Don't show form multiple times
+        let conversationActive = false;  // Track if conversation is ongoing
+        let autoListenAfterResponse = true; // Auto-restart listening after AI responds
+        let recognitionRestartTimeout = null; // Timeout for restarting recognition
+        let noSpeechRetryCount = 0; // Track no-speech errors for smart retry
+        const MAX_NO_SPEECH_RETRIES = 3; // Max retries before requiring manual restart
 
         // DOM Elements
         const chat = document.getElementById('chat');
@@ -864,7 +869,7 @@
             }
         };
 
-        // Initialize Speech Recognition
+        // Initialize Speech Recognition with continuous conversation support
         function initSpeechRecognition() {
             if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
                 addMessage('error', 'Spracherkennung wird nicht unterstützt. Bitte verwenden Sie Chrome oder Safari.');
@@ -874,17 +879,20 @@
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             recognition = new SpeechRecognition();
             recognition.lang = 'de-DE';
-            recognition.continuous = false;
+            recognition.continuous = false;  // We'll handle continuous mode manually
             recognition.interimResults = true;
             recognition.maxAlternatives = 1;
 
             recognition.onstart = () => {
                 isRecording = true;
+                noSpeechRetryCount = 0; // Reset retry counter on successful start
                 micBtn.classList.add('recording');
                 micIcon.textContent = '🔴';
                 micHint.textContent = 'Ich höre...';
                 micHint.classList.add('recording');
                 transcriptPreview.textContent = '';
+                updateStatus('listening');
+                console.log('Speech recognition started');
             };
 
             recognition.onresult = (event) => {
@@ -893,6 +901,7 @@
 
                 if (result.isFinal) {
                     transcriptPreview.textContent = '';
+                    noSpeechRetryCount = 0; // Reset on successful speech
                     processUserInput(transcript);
                 } else {
                     transcriptPreview.textContent = transcript;
@@ -901,25 +910,147 @@
 
             recognition.onerror = (event) => {
                 console.error('Speech recognition error:', event.error);
-                stopRecording();
 
                 if (event.error === 'no-speech') {
-                    addMessage('system', 'Keine Sprache erkannt. Bitte versuchen Sie es erneut.');
+                    noSpeechRetryCount++;
+                    console.log(`No speech detected (attempt ${noSpeechRetryCount}/${MAX_NO_SPEECH_RETRIES})`);
+
+                    if (noSpeechRetryCount < MAX_NO_SPEECH_RETRIES && conversationActive && !formShownThisSession) {
+                        // Auto-retry listening without showing error message
+                        stopRecording();
+                        scheduleAutoListen(500, true); // Quick retry, silent
+                        return;
+                    } else if (noSpeechRetryCount >= MAX_NO_SPEECH_RETRIES) {
+                        addMessage('system', 'Ich höre Sie nicht. Tippen Sie auf das Mikrofon, um fortzufahren.');
+                        conversationActive = false;
+                    }
                 } else if (event.error === 'not-allowed') {
                     addMessage('error', 'Mikrofon-Zugriff verweigert. Bitte erlauben Sie den Zugriff.');
+                    conversationActive = false;
+                } else if (event.error === 'aborted') {
+                    // User or system aborted, don't show error
+                    console.log('Recognition aborted');
+                } else if (event.error === 'network') {
+                    addMessage('system', 'Netzwerkfehler. Bitte prüfen Sie Ihre Verbindung.');
                 }
+
+                stopRecording();
             };
 
             recognition.onend = () => {
+                console.log('Speech recognition ended');
                 stopRecording();
+
+                // Don't auto-restart if:
+                // - Form is showing
+                // - Speaking is in progress
+                // - Conversation is not active
+                // - Already recording somehow
             };
 
             return true;
         }
 
+        // Update status indicator
+        function updateStatus(state) {
+            const statusDot = document.getElementById('statusDot');
+            const statusText = document.getElementById('statusText');
+
+            switch(state) {
+                case 'listening':
+                    statusDot.style.background = '#f43f5e'; // Red for recording
+                    statusText.textContent = 'Höre zu...';
+                    break;
+                case 'speaking':
+                    statusDot.style.background = '#06b6d4'; // Cyan for AI speaking
+                    statusText.textContent = 'Antwortet...';
+                    break;
+                case 'processing':
+                    statusDot.style.background = '#f59e0b'; // Amber for processing
+                    statusText.textContent = 'Verarbeite...';
+                    break;
+                case 'ready':
+                default:
+                    statusDot.style.background = '#34d399'; // Green for ready
+                    statusText.textContent = 'Bereit';
+                    break;
+            }
+        }
+
+        // Schedule auto-listen after AI response
+        function scheduleAutoListen(delay = 300, silent = false) {
+            // Clear any pending restart
+            if (recognitionRestartTimeout) {
+                clearTimeout(recognitionRestartTimeout);
+            }
+
+            recognitionRestartTimeout = setTimeout(() => {
+                // Only auto-listen if conditions are right
+                if (conversationActive &&
+                    autoListenAfterResponse &&
+                    !isSpeaking &&
+                    !isRecording &&
+                    !formShownThisSession &&
+                    !infoOverlay.classList.contains('active')) {
+
+                    if (!silent) {
+                        console.log('Auto-starting listening after AI response');
+                    }
+                    startListening();
+                }
+            }, delay);
+        }
+
+        // Start listening (can be called programmatically)
+        function startListening() {
+            if (isRecording || isSpeaking) {
+                console.log('Cannot start listening: already recording or speaking');
+                return false;
+            }
+
+            try {
+                recognition.start();
+                return true;
+            } catch (e) {
+                console.error('Failed to start recognition:', e);
+                // If already started, try stopping first then starting
+                if (e.message && e.message.includes('already started')) {
+                    recognition.stop();
+                    setTimeout(() => {
+                        try {
+                            recognition.start();
+                        } catch (e2) {
+                            console.error('Retry failed:', e2);
+                        }
+                    }, 100);
+                }
+                return false;
+            }
+        }
+
+        // Stop listening
+        function stopListening() {
+            if (recognitionRestartTimeout) {
+                clearTimeout(recognitionRestartTimeout);
+                recognitionRestartTimeout = null;
+            }
+
+            if (recognition && isRecording) {
+                try {
+                    recognition.stop();
+                } catch (e) {
+                    console.error('Error stopping recognition:', e);
+                }
+            }
+        }
+
         // Process user input with language detection and conversation flow
         function processUserInput(text) {
             addMessage('user', text);
+
+            // Mark conversation as active
+            conversationActive = true;
+            updateStatus('processing');
 
             // Accumulate job description across turns
             if (pendingJobDescription) {
@@ -1009,6 +1140,25 @@
 
             isSpeaking = true;
             speakingIndicator.classList.add('active');
+            updateStatus('speaking');
+
+            // Helper to handle completion and auto-listen
+            const handleTTSComplete = () => {
+                isSpeaking = false;
+                speakingIndicator.classList.remove('active');
+                updateStatus('ready');
+
+                // Execute callback first (may show form)
+                if (onComplete) onComplete();
+
+                // Then schedule auto-listen if conversation is still active
+                // Small delay to let form appear if needed
+                setTimeout(() => {
+                    if (conversationActive && !formShownThisSession && !infoOverlay.classList.contains('active')) {
+                        scheduleAutoListen(500);
+                    }
+                }, 100);
+            };
 
             // Try backend TTS first
             fetch('/api/v1/audio/tts', {
@@ -1027,27 +1177,28 @@
                 currentAudioElement = new Audio(audioUrl);
 
                 currentAudioElement.onended = () => {
-                    isSpeaking = false;
-                    speakingIndicator.classList.remove('active');
                     URL.revokeObjectURL(audioUrl);
                     currentAudioElement = null;
-                    if (onComplete) onComplete();
+                    handleTTSComplete();
                 };
 
                 currentAudioElement.onerror = () => {
-                    isSpeaking = false;
-                    speakingIndicator.classList.remove('active');
                     URL.revokeObjectURL(audioUrl);
                     currentAudioElement = null;
                     // Fallback to browser TTS
-                    fallbackSpeakWithCallback(text, language, onComplete);
+                    fallbackSpeakWithCallback(text, language, handleTTSComplete);
                 };
 
-                currentAudioElement.play();
+                currentAudioElement.play().catch(err => {
+                    console.error('Audio play failed:', err);
+                    URL.revokeObjectURL(audioUrl);
+                    fallbackSpeakWithCallback(text, language, handleTTSComplete);
+                });
             })
-            .catch(() => {
+            .catch((err) => {
+                console.error('TTS fetch failed:', err);
                 // Fallback to browser TTS
-                fallbackSpeakWithCallback(text, language, onComplete);
+                fallbackSpeakWithCallback(text, language, handleTTSComplete);
             });
         }
 
@@ -1056,6 +1207,7 @@
             if (!synth) {
                 isSpeaking = false;
                 speakingIndicator.classList.remove('active');
+                updateStatus('ready');
                 if (onComplete) onComplete();
                 return;
             }
@@ -1201,18 +1353,25 @@
         }
 
         function showInfoForm() {
+            // Stop listening when form is shown
+            stopListening();
+            conversationActive = false;
             infoOverlay.classList.add('active');
+            updateStatus('ready');
         }
 
         function hideInfoForm() {
             infoOverlay.classList.remove('active');
             // Reset conversation state to allow new conversation
             resetConversationState();
+            updateStatus('ready');
         }
 
         function resetConversationState() {
             conversationTurns = 0;
             readyForJobCreation = false;
+            conversationActive = false;
+            noSpeechRetryCount = 0;
             // Note: Don't reset formShownThisSession here - that prevents re-showing during same session
             // Reset pendingJobDescription for new conversations
             pendingJobDescription = '';
@@ -1223,8 +1382,11 @@
             conversationTurns = 0;
             readyForJobCreation = false;
             formShownThisSession = false;
+            conversationActive = false;
+            noSpeechRetryCount = 0;
             pendingJobDescription = '';
             conversationHistory = [];
+            updateStatus('ready');
         }
 
         function addMessage(type, text) {
@@ -1370,6 +1532,9 @@
             }
             isSpeaking = false;
             speakingIndicator.classList.remove('active');
+
+            // Don't reset to 'ready' here - let the caller decide
+            // This prevents status flickering during transitions
         }
 
         // Fallback to browser TTS if backend fails
@@ -1419,12 +1584,12 @@
 
             if (isRecording) {
                 recognition.stop();
+                conversationActive = false; // User manually stopped
             } else {
-                try {
-                    recognition.start();
-                } catch (e) {
-                    console.error('Failed to start recognition:', e);
-                }
+                // User manually starting - activate conversation
+                conversationActive = true;
+                noSpeechRetryCount = 0;
+                startListening();
             }
         }
 
@@ -1432,8 +1597,13 @@
             isRecording = false;
             micBtn.classList.remove('recording');
             micIcon.textContent = '🎤';
-            micHint.textContent = 'Zum Sprechen tippen';
+            micHint.textContent = conversationActive ? 'Ich höre gleich wieder...' : 'Zum Sprechen tippen';
             micHint.classList.remove('recording');
+
+            // Update status based on conversation state
+            if (!isSpeaking && !conversationActive) {
+                updateStatus('ready');
+            }
         }
 
         // Event listeners
