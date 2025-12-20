@@ -132,8 +132,7 @@ class NotificationService:
         job_metadata["eta_notification_time"] = datetime.now(timezone.utc).isoformat()
         job_metadata["eta_minutes"] = eta_minutes
         job_metadata["eta_sms_id"] = str(sms.id)
-        job.metadata_json = job_metadata
-        await self.job_repo.update(job)
+        await self.job_repo.update(job.id, {"metadata_json": job_metadata})
 
         # Send the SMS (mock implementation - in production would call actual provider)
         await self._send_sms(sms)
@@ -322,8 +321,7 @@ class NotificationService:
         job_metadata["feedback_requested"] = True
         job_metadata["feedback_request_time"] = datetime.now(timezone.utc).isoformat()
         job_metadata["feedback_sms_id"] = str(sms.id)
-        job.metadata_json = job_metadata
-        await self.job_repo.update(job)
+        await self.job_repo.update(job.id, {"metadata_json": job_metadata})
 
         return {
             "success": True,
