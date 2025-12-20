@@ -66,12 +66,48 @@ ai:
     temperature: 0.7
     max_tokens: 256
 
-  # Text-to-Speech (Piper)
+  # Text-to-Speech (Piper) - Local fallback
   tts:
     model: "de_DE-thorsten-medium"
     model_path: "models/tts"
     speaker_id: 0
     sample_rate: 22050
+
+  # ---------------------------------------------------------------------------
+  # CLOUD AI PROVIDERS - Full Performance Mode
+  # ---------------------------------------------------------------------------
+  # Enable for production: ultra-low latency, high-quality AI
+  # Set API keys via environment variables (never commit secrets!)
+  cloud:
+    # Master switch - set to true for cloud AI
+    enabled: true
+
+    # Provider mode: local, cloud, hybrid (cloud LLM only)
+    provider: "cloud"
+
+    # Fallback to local models on cloud API errors
+    fallback_to_local: true
+
+    # Groq LLM - Ultra-fast inference (~300ms)
+    # Model: Llama 3.3 70B Versatile
+    # Set GROQ_API_KEY environment variable
+    groq_api_key: ""  # Set via GROQ_API_KEY env var
+    groq_model: "llama-3.3-70b-versatile"
+
+    # Deepgram STT - Fast transcription (~100ms)
+    # Model: Nova-2 (best accuracy for German)
+    # Set DEEPGRAM_API_KEY environment variable
+    deepgram_api_key: ""  # Set via DEEPGRAM_API_KEY env var
+    deepgram_model: "nova-2"
+
+    # ElevenLabs TTS - Natural German voices (~75ms)
+    # Model: Flash v2.5 (ultra-low latency)
+    # Voice: Adam (deep male) - pNInz6obpgDQGcFmaJgB
+    # Other voices: Rachel, Elli, Josh, Domi, Bella, Antoni, Callum
+    # Set ELEVENLABS_API_KEY environment variable
+    elevenlabs_api_key: ""  # Set via ELEVENLABS_API_KEY env var
+    elevenlabs_voice_id: "pNInz6obpgDQGcFmaJgB"  # Adam (deep male)
+    elevenlabs_model: "eleven_flash_v2_5"
 
 # =============================================================================
 # TELEPHONY - Choose ONE backend

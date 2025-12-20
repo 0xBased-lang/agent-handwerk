@@ -1424,3 +1424,267 @@ async def get_dashboard_stats(
             {"label": "Offene Notfälle", "endpoint": "GET /handwerk/jobs?urgency=notfall&status=requested"},
         ],
     }
+
+
+# ====================
+# Notification Endpoints
+# ====================
+
+class ETANotificationRequest(BaseModel):
+    """Request model for ETA notification."""
+
+    eta_minutes: int = Field(ge=1, le=120, default=15, description="ETA in minutes")
+    technician_name: str | None = Field(default=None, description="Technician name")
+
+
+class FeedbackRequestModel(BaseModel):
+    """Request model for feedback request."""
+
+    feedback_url: str | None = Field(default=None, description="Optional feedback form URL")
+
+
+@router.post("/jobs/{job_id}/notify/eta")
+async def send_eta_notification(
+    job_id: str,
+    request: ETANotificationRequest,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Send ETA notification to customer.
+
+    Sends SMS: "Techniker unterwegs, Ankunft in ca. X Minuten"
+
+    Args:
+        job_id: Job UUID
+        request: ETA details (minutes, technician name)
+
+    Returns:
+        Notification status and details
+    """
+    from phone_agent.db.repositories.sms import SMSMessageRepository
+    from phone_agent.db.repositories.jobs import JobRepository
+    from phone_agent.services.notification_service import NotificationService
+
+    try:
+        job_uuid = UUID(job_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid job ID format")
+
+    sms_repo = SMSMessageRepository(db)
+    job_repo = JobRepository(db)
+
+    notification_service = NotificationService(
+        sms_repo=sms_repo,
+        job_repo=job_repo,
+    )
+
+    result = await notification_service.send_eta_notification(
+        job_id=job_uuid,
+        eta_minutes=request.eta_minutes,
+        technician_name=request.technician_name,
+    )
+
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result.get("error", "Failed to send notification"))
+
+    await db.commit()
+    return result
+
+
+@router.post("/jobs/{job_id}/notify/confirmation")
+async def send_appointment_confirmation(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Send appointment confirmation SMS.
+
+    Args:
+        job_id: Job UUID
+
+    Returns:
+        Notification status
+    """
+    from phone_agent.db.repositories.sms import SMSMessageRepository
+    from phone_agent.db.repositories.jobs import JobRepository
+    from phone_agent.services.notification_service import NotificationService
+    from phone_agent.industry.handwerk.scheduling import TIME_WINDOW_NAMES, TimeWindow
+
+    try:
+        job_uuid = UUID(job_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid job ID format")
+
+    job_repo = JobRepository(db)
+    job = await job_repo.get_with_relations(job_uuid)
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if not job.scheduled_date:
+        raise HTTPException(status_code=400, detail="Job has no scheduled date")
+
+    sms_repo = SMSMessageRepository(db)
+    notification_service = NotificationService(
+        sms_repo=sms_repo,
+        job_repo=job_repo,
+    )
+
+    # Format date and time window
+    date_str = job.scheduled_date.strftime("%d.%m.%Y")
+    time_window = job.preferred_time_window or "Tagsüber"
+
+    # Try to get German name for time window
+    try:
+        window_enum = TimeWindow(time_window)
+        time_window = TIME_WINDOW_NAMES.get(window_enum, time_window)
+    except ValueError:
+        pass
+
+    result = await notification_service.send_appointment_confirmation(
+        job_id=job_uuid,
+        date_str=date_str,
+        time_window=time_window,
+    )
+
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result.get("error", "Failed to send notification"))
+
+    await db.commit()
+    return result
+
+
+@router.post("/jobs/{job_id}/notify/reminder")
+async def send_appointment_reminder(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Send appointment reminder SMS (day before).
+
+    Args:
+        job_id: Job UUID
+
+    Returns:
+        Notification status
+    """
+    from phone_agent.db.repositories.sms import SMSMessageRepository
+    from phone_agent.db.repositories.jobs import JobRepository
+    from phone_agent.services.notification_service import NotificationService
+    from phone_agent.industry.handwerk.scheduling import TIME_WINDOW_NAMES, TimeWindow
+
+    try:
+        job_uuid = UUID(job_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid job ID format")
+
+    job_repo = JobRepository(db)
+    job = await job_repo.get_with_relations(job_uuid)
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    sms_repo = SMSMessageRepository(db)
+    notification_service = NotificationService(
+        sms_repo=sms_repo,
+        job_repo=job_repo,
+    )
+
+    # Get time window
+    time_window = job.preferred_time_window or "Tagsüber"
+    try:
+        window_enum = TimeWindow(time_window)
+        time_window = TIME_WINDOW_NAMES.get(window_enum, time_window)
+    except ValueError:
+        pass
+
+    result = await notification_service.send_appointment_reminder(
+        job_id=job_uuid,
+        time_window=time_window,
+    )
+
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result.get("error", "Failed to send notification"))
+
+    await db.commit()
+    return result
+
+
+@router.post("/jobs/{job_id}/notify/feedback")
+async def send_feedback_request(
+    job_id: str,
+    request: FeedbackRequestModel | None = None,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Send post-job feedback request SMS.
+
+    Args:
+        job_id: Job UUID
+        request: Optional feedback URL
+
+    Returns:
+        Notification status
+    """
+    from phone_agent.db.repositories.sms import SMSMessageRepository
+    from phone_agent.db.repositories.jobs import JobRepository
+    from phone_agent.services.notification_service import NotificationService
+
+    try:
+        job_uuid = UUID(job_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid job ID format")
+
+    sms_repo = SMSMessageRepository(db)
+    job_repo = JobRepository(db)
+
+    notification_service = NotificationService(
+        sms_repo=sms_repo,
+        job_repo=job_repo,
+    )
+
+    result = await notification_service.send_feedback_request(
+        job_id=job_uuid,
+        feedback_url=request.feedback_url if request else None,
+    )
+
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result.get("error", "Failed to send notification"))
+
+    await db.commit()
+    return result
+
+
+@router.get("/jobs/{job_id}/notifications")
+async def get_job_notifications(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Get notification history for a job.
+
+    Args:
+        job_id: Job UUID
+
+    Returns:
+        List of notifications sent for this job
+    """
+    from phone_agent.db.repositories.sms import SMSMessageRepository
+    from phone_agent.db.repositories.jobs import JobRepository
+    from phone_agent.services.notification_service import NotificationService
+
+    try:
+        job_uuid = UUID(job_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid job ID format")
+
+    sms_repo = SMSMessageRepository(db)
+    job_repo = JobRepository(db)
+
+    notification_service = NotificationService(
+        sms_repo=sms_repo,
+        job_repo=job_repo,
+    )
+
+    notifications = await notification_service.get_notification_history(job_uuid)
+
+    return {
+        "job_id": job_id,
+        "notifications": notifications,
+        "count": len(notifications),
+    }

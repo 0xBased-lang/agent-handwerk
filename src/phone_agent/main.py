@@ -40,6 +40,7 @@ from phone_agent.api import (
     websocket_analytics,
     chat_websocket,
     jobs,
+    elektro,
 )
 from phone_agent.api import tenant_api, email_api
 from phone_agent.db import init_db, close_db
@@ -384,6 +385,7 @@ def create_app() -> FastAPI:
     app.include_router(compliance.router, prefix="/api/v1", tags=["Compliance"])
     app.include_router(handwerk_demo.router, tags=["Handwerk Demo"])
     app.include_router(handwerk.router, prefix="/api/v1", tags=["Handwerk"])
+    app.include_router(elektro.router, prefix="/api/v1", tags=["Elektro-Betrieb"])
     app.include_router(websocket_analytics.router, prefix="/api/v1/ws", tags=["WebSocket Analytics"])
     app.include_router(chat_websocket.router, prefix="/api/v1", tags=["Chat"])
     app.include_router(jobs.router, prefix="/api/v1", tags=["Jobs"])
@@ -391,15 +393,30 @@ def create_app() -> FastAPI:
     app.include_router(email_api.router, prefix="/api/v1", tags=["Email Agent"])
 
     # Mount static files for browser testing
-    # Use absolute path since __file__ may point to installed package location
-    static_dir = Path("/app/static")
+    # Try multiple paths: production Docker path first, then local development paths
     log = get_logger(__name__)
-    log.info(f"Mounting static files from {static_dir}")
-    try:
-        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
-        log.info("Static files mounted successfully")
-    except Exception as e:
-        log.error(f"Failed to mount static files: {e}")
+    static_dir = None
+    possible_paths = [
+        Path("/app/static"),  # Production Docker
+        Path(__file__).parent.parent.parent.parent / "static",  # Local: solutions/phone-agent/static
+        Path.cwd() / "static",  # Current working directory
+        Path.cwd() / "solutions/phone-agent/static",  # From project root
+    ]
+
+    for path in possible_paths:
+        if path.exists() and path.is_dir():
+            static_dir = path
+            break
+
+    if static_dir:
+        log.info(f"Mounting static files from {static_dir}")
+        try:
+            app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+            log.info("Static files mounted successfully")
+        except Exception as e:
+            log.error(f"Failed to mount static files: {e}")
+    else:
+        log.warning(f"No static directory found in any of: {[str(p) for p in possible_paths]}")
 
     return app
 

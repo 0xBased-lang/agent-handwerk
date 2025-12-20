@@ -11,6 +11,7 @@ from uuid import UUID
 
 from sqlalchemy import select, func, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from phone_agent.db.models.handwerk import JobModel, JobStatus, JobUrgency
 from phone_agent.db.repositories.base import BaseRepository
@@ -260,10 +261,47 @@ class JobRepository(BaseRepository[JobModel]):
         result = await self._session.execute(stmt)
         return result.scalar() or 0
 
-    async def count_by_trade(self, trade_category: str) -> int:
+    async def count_by_trade(
+        self,
+        trade_category: str,
+        days_back: int | None = None,
+    ) -> int:
         """Count jobs for specific trade category.
 
         Args:
+            trade_category: Trade category
+            days_back: If set, only count jobs from the last N days
+
+        Returns:
+            Count of jobs
+        """
+        conditions = [
+            self._model.trade_category == trade_category,
+            self._model.is_deleted == False,
+        ]
+
+        if days_back is not None:
+            from datetime import datetime, timedelta
+            cutoff = datetime.now() - timedelta(days=days_back)
+            conditions.append(self._model.created_at >= cutoff)
+
+        stmt = (
+            select(func.count())
+            .select_from(self._model)
+            .where(and_(*conditions))
+        )
+        result = await self._session.execute(stmt)
+        return result.scalar() or 0
+
+    async def count_by_status_and_trade(
+        self,
+        status: str,
+        trade_category: str,
+    ) -> int:
+        """Count jobs by status and trade category.
+
+        Args:
+            status: Job status string value (e.g., 'requested', 'scheduled')
             trade_category: Trade category
 
         Returns:
@@ -274,6 +312,7 @@ class JobRepository(BaseRepository[JobModel]):
             .select_from(self._model)
             .where(
                 and_(
+                    self._model.status == status,
                     self._model.trade_category == trade_category,
                     self._model.is_deleted == False,
                 )
@@ -281,6 +320,78 @@ class JobRepository(BaseRepository[JobModel]):
         )
         result = await self._session.execute(stmt)
         return result.scalar() or 0
+
+    async def list_by_trade(
+        self,
+        trade_category: str,
+        status: str | None = None,
+        urgency: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+        days_back: int | None = None,
+    ) -> list["JobModel"]:
+        """List jobs by trade category with optional filters.
+
+        Args:
+            trade_category: Trade category to filter by
+            status: Optional status filter (string value like 'requested')
+            urgency: Optional urgency filter (string value like 'notfall')
+            limit: Max results
+            offset: Pagination offset
+            days_back: Only return jobs from the last N days
+
+        Returns:
+            List of job models
+        """
+        conditions = [
+            self._model.trade_category == trade_category,
+            self._model.is_deleted == False,
+        ]
+
+        if status is not None:
+            conditions.append(self._model.status == status)
+
+        if urgency is not None:
+            conditions.append(self._model.urgency == urgency)
+
+        if days_back is not None:
+            from datetime import datetime, timedelta
+            cutoff = datetime.now() - timedelta(days=days_back)
+            conditions.append(self._model.created_at >= cutoff)
+
+        stmt = (
+            select(self._model)
+            .options(
+                selectinload(self._model.contact),
+                selectinload(self._model.transcript),
+            )
+            .where(and_(*conditions))
+            .order_by(self._model.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def get_with_relations(self, job_id: UUID) -> JobModel | None:
+        """Get a job by ID with contact and transcript relations loaded.
+
+        Args:
+            job_id: Job UUID
+
+        Returns:
+            JobModel with relations or None if not found
+        """
+        stmt = (
+            select(self._model)
+            .options(
+                selectinload(self._model.contact),
+                selectinload(self._model.transcript),
+            )
+            .where(self._model.id == job_id)
+        )
+        result = await self._session.execute(stmt)
+        return result.scalar_one_or_none()
 
     async def get_revenue_stats(
         self,

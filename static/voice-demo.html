@@ -653,18 +653,21 @@
         let synth = window.speechSynthesis;
         let isRecording = false;
         let isSpeaking = false;
+        let isProcessing = false;  // CRITICAL: Lock to prevent multiple simultaneous responses
         let conversationHistory = [];
         let pendingJobDescription = '';
         let currentLanguage = 'de';  // Current detected language
-        let conversationTurns = 0;   // Track number of exchanges
-        let readyForJobCreation = false;  // Only show form when explicitly ready
         let formShownThisSession = false; // Don't show form multiple times
         let conversationActive = false;  // Track if conversation is ongoing
-        let continuousListening = false; // Track continuous listening mode
-        let autoListenAfterResponse = true; // Auto-restart listening after AI responds
-        let recognitionRestartTimeout = null; // Timeout for restarting recognition
-        let noSpeechRetryCount = 0; // Track no-speech errors for smart retry
-        const MAX_NO_SPEECH_RETRIES = 3; // Max retries before requiring manual restart
+        let lastProcessedText = '';  // Debounce: track last processed text
+        let lastProcessedTime = 0;   // Debounce: track last processed time
+        const DEBOUNCE_MS = 2000;    // Ignore duplicate texts within 2 seconds
+
+        // Backend-driven conversation state
+        let sessionId = 'session-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+        let conversationState = 'greeting';  // From backend
+        let detectedUrgency = 'normal';  // From backend
+        let detectedTrade = null;  // From backend
 
         // DOM Elements
         const chat = document.getElementById('chat');
@@ -692,6 +695,52 @@
             /\b(appointment|schedule|today|tomorrow)\b/i,
             /\b(the|and|or|but|with|for)\b/i
         ];
+
+        // === TIMEOUT & SAFETY UTILITIES ===
+        const FETCH_TIMEOUT_MS = 30000;  // 30 second timeout for API calls
+        const PROCESSING_SAFETY_TIMEOUT_MS = 60000;  // 60 second safety timeout
+        let processingStartTime = 0;
+
+        // Fetch with timeout wrapper - prevents hanging on slow/dead APIs
+        async function fetchWithTimeout(url, options, timeout = FETCH_TIMEOUT_MS) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+            try {
+                const response = await fetch(url, {
+                    ...options,
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+                return response;
+            } catch (error) {
+                clearTimeout(timeoutId);
+                if (error.name === 'AbortError') {
+                    throw new Error(`Request timeout after ${timeout}ms`);
+                }
+                throw error;
+            }
+        }
+
+        // Safety function to force-release locks if stuck too long
+        function checkAndReleaseStaleLock() {
+            if (isProcessing && processingStartTime > 0) {
+                const elapsed = Date.now() - processingStartTime;
+                if (elapsed > PROCESSING_SAFETY_TIMEOUT_MS) {
+                    console.warn(`SAFETY: Force-releasing stale lock after ${elapsed}ms`);
+                    isProcessing = false;
+                    isSpeaking = false;
+                    processingStartTime = 0;
+                    updateStatus('ready');
+                    addMessage('system', 'Verbindung unterbrochen. Bitte erneut sprechen.');
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // Run safety check every 10 seconds
+        setInterval(checkAndReleaseStaleLock, 10000);
 
         // Detect language from text
         function detectLanguage(text) {
@@ -880,30 +929,43 @@
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             recognition = new SpeechRecognition();
             recognition.lang = 'de-DE';
-            recognition.continuous = true;  // Enable continuous listening for natural conversation flow
+            recognition.continuous = false;  // FIXED: Single-shot mode prevents duplicate results
             recognition.interimResults = true;
             recognition.maxAlternatives = 1;
 
             recognition.onstart = () => {
                 isRecording = true;
-                continuousListening = true;
-                noSpeechRetryCount = 0; // Reset retry counter on successful start
                 micBtn.classList.add('recording');
                 micIcon.textContent = '🔴';
                 micHint.textContent = 'Ich höre...';
                 micHint.classList.add('recording');
                 transcriptPreview.textContent = '';
                 updateStatus('listening');
-                console.log('Speech recognition started (continuous mode)');
+                console.log('Speech recognition started');
             };
 
             recognition.onresult = (event) => {
                 const result = event.results[event.results.length - 1];
-                const transcript = result[0].transcript;
+                const transcript = result[0].transcript.trim();
 
-                if (result.isFinal) {
+                if (result.isFinal && transcript) {
                     transcriptPreview.textContent = '';
-                    noSpeechRetryCount = 0; // Reset on successful speech
+
+                    // CRITICAL: Debounce - ignore if same text within 2 seconds
+                    const now = Date.now();
+                    if (transcript === lastProcessedText && (now - lastProcessedTime) < DEBOUNCE_MS) {
+                        console.log('DEBOUNCE: Ignoring duplicate text:', transcript.substring(0, 30));
+                        return;
+                    }
+
+                    // CRITICAL: Lock check - ignore if already processing
+                    if (isProcessing) {
+                        console.log('LOCKED: Ignoring input while processing:', transcript.substring(0, 30));
+                        return;
+                    }
+
+                    lastProcessedText = transcript;
+                    lastProcessedTime = now;
                     processUserInput(transcript);
                 } else {
                     transcriptPreview.textContent = transcript;
@@ -913,24 +975,12 @@
             recognition.onerror = (event) => {
                 console.error('Speech recognition error:', event.error);
 
-                if (event.error === 'no-speech') {
-                    noSpeechRetryCount++;
-                    console.log(`No speech detected (attempt ${noSpeechRetryCount}/${MAX_NO_SPEECH_RETRIES})`);
-
-                    if (noSpeechRetryCount < MAX_NO_SPEECH_RETRIES && conversationActive && !formShownThisSession) {
-                        // Auto-retry listening without showing error message
-                        stopRecording();
-                        scheduleAutoListen(500, true); // Quick retry, silent
-                        return;
-                    } else if (noSpeechRetryCount >= MAX_NO_SPEECH_RETRIES) {
-                        addMessage('system', 'Ich höre Sie nicht. Tippen Sie auf das Mikrofon, um fortzufahren.');
-                        conversationActive = false;
-                    }
-                } else if (event.error === 'not-allowed') {
+                if (event.error === 'not-allowed') {
                     addMessage('error', 'Mikrofon-Zugriff verweigert. Bitte erlauben Sie den Zugriff.');
-                    conversationActive = false;
+                } else if (event.error === 'no-speech') {
+                    // Silent - just stop, user can tap again
+                    console.log('No speech detected');
                 } else if (event.error === 'aborted') {
-                    // User or system aborted, don't show error
                     console.log('Recognition aborted');
                 } else if (event.error === 'network') {
                     addMessage('system', 'Netzwerkfehler. Bitte prüfen Sie Ihre Verbindung.');
@@ -940,42 +990,9 @@
             };
 
             recognition.onend = () => {
-                console.log('=== RECOGNITION ENDED, isSpeaking:', isSpeaking, 'continuousListening:', continuousListening);
+                console.log('Recognition ended, isProcessing:', isProcessing);
                 stopRecording();
-
-                // Auto-restart in continuous mode - use polling to wait for TTS to finish
-                if (continuousListening && conversationActive &&
-                    !infoOverlay.classList.contains('active')) {
-
-                    // Polling function that waits for isSpeaking=false
-                    const tryRestart = () => {
-                        console.log('=== TRY RESTART, isSpeaking:', isSpeaking);
-
-                        // If still speaking, wait and try again
-                        if (isSpeaking) {
-                            setTimeout(tryRestart, 200);
-                            return;
-                        }
-
-                        // Now safe to restart
-                        if (continuousListening && conversationActive &&
-                            !isRecording && !infoOverlay.classList.contains('active')) {
-                            try {
-                                recognition.start();
-                                console.log('=== AUTO-RESTARTED continuous listening');
-                            } catch (e) {
-                                console.log('=== RESTART FAILED:', e.message);
-                            }
-                        } else {
-                            console.log('=== RESTART SKIPPED, conditions not met');
-                        }
-                    };
-
-                    // Start polling after a short delay
-                    setTimeout(tryRestart, 300);
-                } else {
-                    console.log('=== NO RESTART, continuous mode inactive or blocked');
-                }
+                // Don't auto-restart here - let TTS completion handle it
             };
 
             return true;
@@ -1007,88 +1024,47 @@
             }
         }
 
-        // Schedule auto-listen after AI response
-        function scheduleAutoListen(delay = 300, silent = false) {
-            // Clear any pending restart
-            if (recognitionRestartTimeout) {
-                clearTimeout(recognitionRestartTimeout);
-            }
-
-            recognitionRestartTimeout = setTimeout(() => {
-                // Only auto-listen if conditions are right
-                if (conversationActive &&
-                    autoListenAfterResponse &&
-                    !isSpeaking &&
-                    !isRecording &&
-                    !formShownThisSession &&
-                    !infoOverlay.classList.contains('active')) {
-
-                    if (!silent) {
-                        console.log('Auto-starting listening after AI response');
-                    }
-                    startListening();
-                }
-            }, delay);
-        }
-
-        // Start listening (can be called programmatically)
+        // Start listening
         function startListening() {
-            if (isSpeaking) {
-                console.log('Cannot start listening: speaking in progress');
+            if (isSpeaking || isProcessing) {
+                console.log('Cannot start: speaking or processing');
                 return false;
             }
 
-            // Ensure conversation is active for continuous mode
-            conversationActive = true;
-            continuousListening = true;
-
-            // If already recording in continuous mode, that's fine
             if (isRecording) {
                 console.log('Already listening');
                 return true;
             }
 
+            conversationActive = true;
+
             try {
                 recognition.start();
                 return true;
             } catch (e) {
-                // Handle "already started" gracefully - it's not an error in continuous mode
-                if (e.message && e.message.includes('already started')) {
-                    console.log('Recognition already running');
-                    return true;
-                }
                 console.error('Failed to start recognition:', e);
                 return false;
             }
         }
 
-        // Pause recognition without killing continuous mode
-        // Used for TTS playback and form display
-        function pauseRecognition() {
-            if (recognitionRestartTimeout) {
-                clearTimeout(recognitionRestartTimeout);
-                recognitionRestartTimeout = null;
-            }
-
+        // Stop listening
+        function stopListening() {
             if (recognition) {
                 try {
                     recognition.stop();
                 } catch (e) {
-                    // Ignore errors when stopping
+                    // Ignore
                 }
             }
         }
 
-        // Full stop - user explicitly stopped listening
-        function stopListening() {
-            console.log('=== STOP LISTENING (user action)');
-            continuousListening = false;
-            conversationActive = false;
-            pauseRecognition();
-        }
+        // Process user input using backend AI conversation API
+        async function processUserInput(text) {
+            // CRITICAL: Set processing lock immediately
+            isProcessing = true;
+            processingStartTime = Date.now();  // Track start time for safety timeout
+            console.log('Processing input:', text.substring(0, 50));
 
-        // Process user input with language detection and conversation flow
-        function processUserInput(text) {
             addMessage('user', text);
 
             // Mark conversation as active
@@ -1102,60 +1078,65 @@
                 pendingJobDescription = text;
             }
 
-            // Detect language from user input
+            // Detect language for client-side display (backend handles conversation)
             const detectedLang = detectLanguage(text);
             currentLanguage = detectedLang;
 
-            // Log language detection for debugging
-            console.log(`Detected language: ${detectedLang} for text: "${text.substring(0, 50)}..."`);
-            console.log(`Conversation turn: ${conversationTurns + 1}, readyForJobCreation: ${readyForJobCreation}`);
+            console.log(`Session: ${sessionId}, Language: ${detectedLang}, State: ${conversationState}`);
 
-            const textLower = text.toLowerCase();
-            const langResponses = responses[detectedLang] || responses.de;
-            let responseData = null;
             let responseText = '';
+            let readyForContact = false;
 
-            // Check each urgency level in order: emergency → urgent → normal
-            for (const urgencyType of ['emergency', 'urgent', 'normal']) {
-                const data = langResponses[urgencyType];
-                if (data && data.keywords.some(kw => textLower.includes(kw.toLowerCase()))) {
-                    responseData = data;
-                    break;
+            try {
+                // Call backend conversation API with timeout
+                const response = await fetchWithTimeout('/api/v1/audio/conversation', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        session_id: sessionId,
+                        message: text,
+                        language: detectedLang
+                    })
+                }, FETCH_TIMEOUT_MS);
+
+                if (response.ok) {
+                    const data = await response.json();
+                    responseText = data.response;
+                    conversationState = data.conversation_state;
+                    readyForContact = data.ready_for_contact;
+                    detectedUrgency = data.urgency;
+                    detectedTrade = data.detected_trade;
+
+                    console.log(`Backend response - State: ${conversationState}, ReadyForContact: ${readyForContact}, Urgency: ${detectedUrgency}`);
+                } else {
+                    // Fallback if API fails
+                    console.warn('Conversation API failed, using fallback');
+                    const fallback = getFallbackResponse(text, detectedLang, conversationHistory.length);
+                    responseText = fallback.response;
+                    readyForContact = fallback.readyForContact;
+                    detectedUrgency = fallback.urgency;
                 }
+            } catch (error) {
+                console.error('Conversation API error:', error);
+                const fallback = getFallbackResponse(text, detectedLang, conversationHistory.length);
+                responseText = fallback.response;
+                readyForContact = fallback.readyForContact;
+                detectedUrgency = fallback.urgency;
             }
 
-            // Increment conversation turn
-            conversationTurns++;
-
-            // Determine which response to give based on conversation state
-            if (responseData) {
-                const turnsNeeded = responseData.showFormAfterTurns || 2;
-
-                if (conversationTurns >= turnsNeeded && !formShownThisSession) {
-                    // Ready to show form - use followup response
-                    responseText = responseData.followup;
-                    readyForJobCreation = true;
-                } else {
-                    // Still gathering info - use initial response
-                    responseText = responseData.initial;
-                }
-            } else {
-                // No keywords matched
-                if (conversationTurns >= 2 && !formShownThisSession) {
-                    // After 2+ turns, offer to create job
-                    responseText = langResponses.genericFollowup || langResponses.fallback;
-                    readyForJobCreation = true;
-                } else {
-                    // Ask for more details
-                    responseText = langResponses.fallback;
-                }
-            }
-
-            // Store conversation context
+            // Store conversation context - both user and assistant messages
             conversationHistory.push({
-                user: text,
-                urgency: responseData?.urgency || 'normal',
-                language: detectedLang
+                role: 'user',
+                content: text,
+                urgency: detectedUrgency,
+                language: detectedLang,
+                timestamp: new Date().toISOString()
+            });
+            conversationHistory.push({
+                role: 'assistant',
+                content: responseText,
+                language: detectedLang,
+                timestamp: new Date().toISOString()
             });
 
             // Show response and speak it
@@ -1164,8 +1145,8 @@
 
                 // Speak the response, then optionally show form after TTS completes
                 speakWithCallback(responseText, detectedLang, () => {
-                    // Only show form if ready and not already shown
-                    if (readyForJobCreation && !formShownThisSession) {
+                    // Only show form if ready AND not already shown
+                    if (readyForContact && !formShownThisSession) {
                         // Small delay after TTS completes before showing form
                         setTimeout(() => {
                             showInfoForm();
@@ -1174,6 +1155,43 @@
                     }
                 });
             }, 500);
+        }
+
+        // Fallback responses when API is unavailable
+        // Returns {response, readyForContact, urgency}
+        function getFallbackResponse(text, language, turnCount) {
+            const textLower = text.toLowerCase();
+            const langResponses = responses[language] || responses.de;
+
+            // Check each urgency level in order: emergency → urgent → normal
+            for (const urgencyType of ['emergency', 'urgent', 'normal']) {
+                const data = langResponses[urgencyType];
+                if (data && data.keywords.some(kw => textLower.includes(kw.toLowerCase()))) {
+                    // Emergency: show form immediately
+                    if (urgencyType === 'emergency') {
+                        return {
+                            response: data.followup,
+                            readyForContact: true,
+                            urgency: data.urgency
+                        };
+                    }
+                    // Urgent/normal: show form after 4+ turns
+                    const ready = turnCount >= 4;
+                    return {
+                        response: ready ? data.followup : data.initial,
+                        readyForContact: ready && !formShownThisSession,
+                        urgency: data.urgency
+                    };
+                }
+            }
+
+            // No keywords: ask for more info, show form after 5 turns
+            const ready = turnCount >= 5;
+            return {
+                response: ready ? langResponses.genericFollowup : langResponses.fallback,
+                readyForContact: ready && !formShownThisSession,
+                urgency: 'normal'
+            };
         }
 
         // Speak with callback when finished (for conversation flow)
@@ -1198,31 +1216,66 @@
                 }
             }
 
-            // Helper to handle completion - recognition.onend handles restart
+            // Helper to handle completion - auto-restart listening
             const handleTTSComplete = () => {
-                console.log('=== TTS COMPLETE, setting isSpeaking=false');
+                console.log('TTS complete, releasing lock');
                 isSpeaking = false;
+                isProcessing = false;  // CRITICAL: Release processing lock
+                processingStartTime = 0;  // Reset safety timer
                 speakingIndicator.classList.remove('active');
 
                 // Execute callback (may show form)
                 if (onComplete) onComplete();
 
-                // Just update status - recognition.onend's polling will restart
-                // when it sees isSpeaking=false
-                if (continuousListening && conversationActive &&
-                    !infoOverlay.classList.contains('active')) {
-                    updateStatus('listening');
+                // Auto-restart listening for seamless conversation
+                if (conversationActive && !infoOverlay.classList.contains('active')) {
+                    // Delay slightly then restart
+                    setTimeout(() => {
+                        console.log('Auto-restart check:', {
+                            isProcessing, isSpeaking, isRecording,
+                            hasRecognition: !!recognition,
+                            conversationActive
+                        });
+
+                        if (!isProcessing && !isSpeaking && !isRecording && recognition) {
+                            try {
+                                recognition.start();
+                                console.log('Auto-restarted listening after TTS');
+                            } catch (e) {
+                                console.error('Could not auto-restart recognition:', e.message);
+                                // Try to reinitialize recognition
+                                if (initSpeechRecognition()) {
+                                    try {
+                                        recognition.start();
+                                        console.log('Restarted after reinit');
+                                    } catch (e2) {
+                                        console.error('Reinit also failed:', e2.message);
+                                        updateStatus('ready');
+                                        addMessage('system', 'Spracherkennung neu starten - bitte auf Mikrofon tippen.');
+                                    }
+                                } else {
+                                    updateStatus('ready');
+                                }
+                            }
+                        } else {
+                            console.log('Auto-restart skipped - conditions not met');
+                            if (!recognition) {
+                                addMessage('system', 'Spracherkennung nicht verfügbar - bitte auf Mikrofon tippen.');
+                            }
+                            updateStatus('ready');
+                        }
+                    }, 500);
                 } else {
                     updateStatus('ready');
                 }
             };
 
-            // Try backend TTS first
-            fetch('/api/v1/audio/tts', {
+            // Try backend TTS first (with timeout)
+            fetchWithTimeout('/api/v1/audio/tts', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ text: text, language: language })
-            })
+            }, FETCH_TIMEOUT_MS)
             .then(response => {
                 if (!response.ok) throw new Error('TTS failed');
                 return response.blob();
@@ -1263,6 +1316,8 @@
         function fallbackSpeakWithCallback(text, language, onComplete) {
             if (!synth) {
                 isSpeaking = false;
+                isProcessing = false;  // Release lock
+                processingStartTime = 0;  // Reset safety timer
                 speakingIndicator.classList.remove('active');
                 updateStatus('ready');
                 if (onComplete) onComplete();
@@ -1318,7 +1373,7 @@
             }
         };
 
-        // Submit customer info and create job
+        // Submit customer info and create job via Elektro API
         async function submitCustomerInfo() {
             const name = document.getElementById('customerName').value.trim();
             const phone = document.getElementById('customerPhone').value.trim();
@@ -1337,20 +1392,35 @@
             hideInfoForm();
             addMessage('system', ui.creatingJob);
 
-            let urgency = 'normal';
+            // Use backend-detected urgency (prefer over re-computing from history)
+            let urgency = detectedUrgency || 'normal';
             let sourceLanguage = currentLanguage;
+            let tradeCategory = detectedTrade || 'elektro';
 
-            // Get the highest urgency and most recent language from conversation
-            for (const msg of conversationHistory) {
-                if (msg.urgency === 'notfall') { urgency = 'notfall'; break; }
-                if (msg.urgency === 'dringend') { urgency = 'dringend'; }
-                if (msg.language) { sourceLanguage = msg.language; }
+            // Fallback: Check conversation history if backend didn't set urgency
+            if (urgency === 'normal') {
+                for (const msg of conversationHistory) {
+                    // Only check user messages for urgency
+                    if (msg.role === 'user' && msg.urgency) {
+                        if (msg.urgency === 'notfall') { urgency = 'notfall'; break; }
+                        if (msg.urgency === 'dringend') { urgency = 'dringend'; }
+                    }
+                }
             }
 
-            try {
-                const jobNumber = 'JOB-' + new Date().getFullYear() + '-' + String(Math.floor(Math.random() * 10000)).padStart(4, '0');
+            // Build conversation turns for transcript storage
+            // Now includes both user and assistant messages with proper roles
+            const conversationTurns = conversationHistory.map((msg, idx) => ({
+                turn_number: Math.floor(idx / 2) + 1,  // Turn number groups user+assistant
+                role: msg.role,
+                content: msg.content,
+                language: msg.language || 'de',
+                timestamp: msg.timestamp || new Date().toISOString()
+            }));
 
-                const response = await fetch('/api/v1/handwerk/jobs', {
+            try {
+                // Use the new Elektro API endpoint which stores transcripts
+                const response = await fetch('/api/v1/elektro/jobs', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -1358,34 +1428,57 @@
                         description: pendingJobDescription || 'Kundenanfrage über Voice Demo',
                         customer_name: name,
                         customer_phone: phone,
-                        trade_category: 'elektro',
+                        trade_category: tradeCategory,
                         urgency: urgency,
-                        // Flat address fields as expected by API
+                        // Flat address fields
                         address_street: street,
                         address_zip: zip,
                         address_city: city,
-                        // Include language context for backend
-                        customer_notes: sourceLanguage !== 'de' ? `[${sourceLanguage.toUpperCase()}] ${pendingJobDescription}` : null
+                        // Include language context
+                        customer_notes: sourceLanguage !== 'de' ? `[${sourceLanguage.toUpperCase()}] ${pendingJobDescription}` : null,
+                        // Conversation transcript for the dashboard
+                        conversation_turns: conversationTurns,
+                        detected_language: sourceLanguage,
+                        session_id: sessionId
                     })
                 });
 
                 let createdJob;
                 if (response.ok) {
                     createdJob = await response.json();
+                    console.log('Job created via Elektro API:', createdJob);
                 } else {
-                    createdJob = {
-                        job_number: jobNumber,
-                        status: 'requested',
-                        urgency: urgency,
-                        trade_category: 'elektro'
-                    };
+                    // Fallback to handwerk API if elektro fails
+                    console.warn('Elektro API failed, trying handwerk fallback');
+                    const fallbackResponse = await fetch('/api/v1/handwerk/jobs', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            title: 'Elektro-Auftrag',
+                            description: pendingJobDescription || 'Kundenanfrage über Voice Demo',
+                            customer_name: name,
+                            customer_phone: phone,
+                            trade_category: tradeCategory,
+                            urgency: urgency,
+                            address_street: street,
+                            address_zip: zip,
+                            address_city: city,
+                            customer_notes: sourceLanguage !== 'de' ? `[${sourceLanguage.toUpperCase()}] ${pendingJobDescription}` : null
+                        })
+                    });
+
+                    if (fallbackResponse.ok) {
+                        createdJob = await fallbackResponse.json();
+                    } else {
+                        throw new Error('Both APIs failed');
+                    }
                 }
 
                 addJobCreatedMessage(createdJob, sourceLanguage);
 
                 // Build success message in the customer's language
                 const msgs = successMessages[sourceLanguage] || successMessages.de;
-                const successMsg = msgs.created(createdJob.job_number || jobNumber) + ' ' + msgs[urgency];
+                const successMsg = msgs.created(createdJob.job_number) + ' ' + msgs[urgency];
 
                 speak(successMsg, sourceLanguage);
 
@@ -1410,61 +1503,42 @@
         }
 
         function showInfoForm() {
-            console.log('=== SHOWING FORM, pausing recognition');
-            // Pause recognition (NOT stop) - keep continuous mode active
-            pauseRecognition();
-            // Keep conversationActive and continuousListening true
-            // so conversation can resume after form is closed
+            console.log('Showing form');
+            stopListening();
             infoOverlay.classList.add('active');
             updateStatus('ready');
         }
 
         function hideInfoForm() {
-            console.log('=== HIDING FORM, continuousListening:', continuousListening);
+            console.log('Hiding form');
             infoOverlay.classList.remove('active');
-
-            // Resume listening if conversation was still active
-            if (continuousListening && conversationActive) {
-                console.log('=== RESUMING LISTENING after form closed');
-                setTimeout(() => {
-                    if (!isRecording && !isSpeaking) {
-                        try {
-                            recognition.start();
-                            updateStatus('listening');
-                        } catch (e) {
-                            console.log('Resume after form failed:', e.message);
-                            updateStatus('ready');
-                        }
-                    }
-                }, 300);
-            } else {
-                // User had stopped conversation before form, reset
-                resetConversationState();
-                updateStatus('ready');
-            }
+            resetConversationState();
+            updateStatus('ready');
         }
 
         function resetConversationState() {
-            conversationTurns = 0;
-            readyForJobCreation = false;
             conversationActive = false;
-            continuousListening = false;
-            noSpeechRetryCount = 0;
-            // Note: Don't reset formShownThisSession here - that prevents re-showing during same session
-            // Reset pendingJobDescription for new conversations
+            isProcessing = false;
             pendingJobDescription = '';
+            conversationState = 'greeting';
+            detectedUrgency = 'normal';
+            detectedTrade = null;
         }
 
         // Full reset for starting completely fresh (e.g., after job submission)
         function fullConversationReset() {
-            conversationTurns = 0;
-            readyForJobCreation = false;
             formShownThisSession = false;
             conversationActive = false;
-            continuousListening = false;
-            noSpeechRetryCount = 0;
+            isProcessing = false;
             pendingJobDescription = '';
             conversationHistory = [];
+            lastProcessedText = '';
+            lastProcessedTime = 0;
+            // Generate new session for fresh start
+            sessionId = 'session-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+            conversationState = 'greeting';
+            detectedUrgency = 'normal';
+            detectedTrade = null;
             updateStatus('ready');
         }
 
@@ -1662,39 +1736,28 @@
                 stopSpeaking();
             }
 
-            // Toggle continuous listening mode
-            if (isRecording || continuousListening) {
-                // User wants to stop listening
+            if (isRecording) {
+                // User wants to stop
                 stopListening();
                 conversationActive = false;
-                console.log('User stopped continuous listening');
+                stopRecording();
             } else {
-                // User wants to start listening
+                // User wants to start
                 if (!recognition) {
                     if (!initSpeechRecognition()) return;
                 }
-                noSpeechRetryCount = 0;
                 startListening();
-                console.log('User started continuous listening');
             }
         }
 
         function stopRecording() {
             isRecording = false;
             micBtn.classList.remove('recording');
-
-            // Show appropriate hint based on state
-            if (continuousListening && conversationActive) {
-                micIcon.textContent = '🎤';
-                micHint.textContent = 'Ich höre gleich wieder...';
-            } else {
-                micIcon.textContent = '🎤';
-                micHint.textContent = 'Zum Sprechen tippen';
-            }
+            micIcon.textContent = '🎤';
+            micHint.textContent = conversationActive ? 'Ich höre gleich wieder...' : 'Zum Sprechen tippen';
             micHint.classList.remove('recording');
 
-            // Update status based on conversation state
-            if (!isSpeaking && !continuousListening) {
+            if (!isSpeaking && !isProcessing) {
                 updateStatus('ready');
             }
         }

@@ -28,6 +28,8 @@ services:
     restart: unless-stopped
     ports:
       - "8180:8080"
+    env_file:
+      - .env
     volumes:
       # Configuration (read-only)
       - ./configs:/app/configs:ro
@@ -54,10 +56,26 @@ services:
       - ITF_API_HOST=0.0.0.0
       - ITF_API_PORT=8080
 
-      # AI Models (LLM via Groq for faster inference)
+      # ===========================================
+      # CLOUD AI - Full Performance Mode
+      # ===========================================
+      # Master switch for cloud AI providers
+      - ITF_AI__CLOUD__ENABLED=${ITF_AI__CLOUD__ENABLED:-true}
+      - ITF_AI__CLOUD__PROVIDER=${ITF_AI__CLOUD__PROVIDER:-cloud}
+      - ITF_AI__CLOUD__FALLBACK_TO_LOCAL=${ITF_AI__CLOUD__FALLBACK_TO_LOCAL:-true}
+
+      # Groq LLM (Llama 3.3 70B - ultra-fast inference)
       - GROQ_API_KEY=${GROQ_API_KEY:-}
-      - ITF_AI__LLM__USE_GROQ=${ITF_AI__LLM__USE_GROQ:-true}
-      - ITF_AI__LLM__MODEL=${ITF_AI__LLM__MODEL:-llama-3.1-8b-instant}
+      - ITF_AI__CLOUD__GROQ_MODEL=${ITF_AI__CLOUD__GROQ_MODEL:-llama-3.3-70b-versatile}
+
+      # Deepgram STT (Nova-2 - fast transcription)
+      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY:-}
+      - ITF_AI__CLOUD__DEEPGRAM_MODEL=${ITF_AI__CLOUD__DEEPGRAM_MODEL:-nova-2}
+
+      # ElevenLabs TTS (Flash v2.5 - 75ms latency, natural German voices)
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
+      - ITF_AI__CLOUD__ELEVENLABS_VOICE_ID=${ITF_AI__CLOUD__ELEVENLABS_VOICE_ID:-pNInz6obpgDQGcFmaJgB}
+      - ITF_AI__CLOUD__ELEVENLABS_MODEL=${ITF_AI__CLOUD__ELEVENLABS_MODEL:-eleven_flash_v2_5}
 
       # Database (SQLite for simplicity)
       - DATABASE_URL=${DATABASE_URL:-sqlite:///data/handwerk.db}

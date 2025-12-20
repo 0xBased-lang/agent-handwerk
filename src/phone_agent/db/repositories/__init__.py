@@ -46,6 +46,7 @@ from phone_agent.db.repositories.compliance import (
 )
 from phone_agent.db.repositories.sms import SMSMessageRepository
 from phone_agent.db.repositories.jobs import JobRepository
+from phone_agent.db.repositories.transcripts import TranscriptRepository
 from phone_agent.db.repositories.tenant_repos import (
     TenantRepository,
     DepartmentRepository,
@@ -77,6 +78,8 @@ __all__ = [
     "SMSMessageRepository",
     # Handwerk
     "JobRepository",
+    # Elektro
+    "TranscriptRepository",
     # Multi-Tenant
     "TenantRepository",
     "DepartmentRepository",

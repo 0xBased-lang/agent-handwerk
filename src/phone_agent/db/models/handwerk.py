@@ -33,6 +33,7 @@ from phone_agent.db.base import Base, UUIDMixin, TimestampMixin, SoftDeleteMixin
 if TYPE_CHECKING:
     from phone_agent.db.models.crm import ContactModel
     from phone_agent.db.models.core import AppointmentModel, CallModel
+    from phone_agent.db.models.elektro import ConversationTranscriptModel
 
 
 # Enums as string constants for database storage
@@ -293,6 +294,12 @@ class JobModel(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     )
     quotes: Mapped[list["QuoteModel"]] = relationship(
         back_populates="job",
+        lazy="selectin",
+    )
+    transcript: Mapped["ConversationTranscriptModel | None"] = relationship(
+        "ConversationTranscriptModel",
+        back_populates="job",
+        uselist=False,
         lazy="selectin",
     )
 

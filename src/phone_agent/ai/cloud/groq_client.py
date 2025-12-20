@@ -38,12 +38,16 @@ class GroqLanguageModel:
     Compatible with local LanguageModel interface.
     """
 
+    # Default timeout for Groq API calls (30 seconds)
+    DEFAULT_TIMEOUT = 30.0
+
     def __init__(
         self,
         api_key: str,
         model: str = "llama-3.3-70b-versatile",
         temperature: float = 0.7,
         max_tokens: int = 256,
+        timeout: float = DEFAULT_TIMEOUT,
     ) -> None:
         """Initialize Groq LLM client.
 
@@ -52,11 +56,13 @@ class GroqLanguageModel:
             model: Model name (llama-3.1-70b-versatile, llama-3.1-8b-instant, etc.)
             temperature: Sampling temperature
             max_tokens: Maximum tokens to generate
+            timeout: API request timeout in seconds (default: 30)
         """
         self.api_key = api_key
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self.timeout = timeout
 
         self._client = None
         self._loaded = False
@@ -84,10 +90,16 @@ class GroqLanguageModel:
                 model=self.model,
             )
 
-            self._client = Groq(api_key=self.api_key)
+            self._client = Groq(
+                api_key=self.api_key,
+                timeout=self.timeout,  # Prevent hanging on slow/unresponsive API
+            )
             self._loaded = True
 
-            log.info("Groq client initialized successfully")
+            log.info(
+                "Groq client initialized successfully",
+                timeout=self.timeout,
+            )
 
         except ImportError:
             log.error("groq package not installed. Run: pip install groq")

@@ -1,0 +1,1874 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Elektro-Betrieb | Auftragsverwaltung</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            /* Industrial Electric Theme */
+            --bg-primary: #0a0a0b;
+            --bg-secondary: #111113;
+            --bg-tertiary: #18181b;
+            --bg-elevated: #1f1f23;
+            --bg-hover: #27272a;
+
+            /* Electric Amber/Yellow - Warning/Power Colors */
+            --accent-primary: #f59e0b;
+            --accent-secondary: #fbbf24;
+            --accent-glow: rgba(245, 158, 11, 0.15);
+            --accent-subtle: rgba(245, 158, 11, 0.08);
+
+            /* Status Colors */
+            --status-notfall: #ef4444;
+            --status-notfall-bg: rgba(239, 68, 68, 0.12);
+            --status-dringend: #f59e0b;
+            --status-dringend-bg: rgba(245, 158, 11, 0.12);
+            --status-normal: #22c55e;
+            --status-normal-bg: rgba(34, 197, 94, 0.12);
+            --status-routine: #64748b;
+            --status-routine-bg: rgba(100, 116, 139, 0.12);
+
+            /* Text */
+            --text-primary: #fafafa;
+            --text-secondary: #a1a1aa;
+            --text-muted: #71717a;
+
+            /* Borders */
+            --border-subtle: rgba(255, 255, 255, 0.06);
+            --border-visible: rgba(255, 255, 255, 0.1);
+
+            /* Fonts */
+            --font-display: 'JetBrains Mono', monospace;
+            --font-body: 'DM Sans', sans-serif;
+
+            /* Sizing */
+            --sidebar-width: 240px;
+            --detail-width: 420px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: var(--font-body);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: var(--border-visible);
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--text-muted);
+        }
+
+        /* ===== LAYOUT ===== */
+        .app-container {
+            display: flex;
+            min-height: 100vh;
+        }
+
+        /* ===== SIDEBAR ===== */
+        .sidebar {
+            width: var(--sidebar-width);
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border-subtle);
+            display: flex;
+            flex-direction: column;
+            position: fixed;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            z-index: 100;
+        }
+
+        .sidebar-header {
+            padding: 24px 20px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .brand-icon {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            box-shadow: 0 4px 12px rgba(245, 158, 11, 0.25);
+        }
+
+        .brand-text {
+            font-family: var(--font-display);
+            font-size: 14px;
+            font-weight: 600;
+            letter-spacing: -0.02em;
+        }
+
+        .brand-sub {
+            font-size: 11px;
+            color: var(--text-muted);
+            font-weight: 400;
+            margin-top: 2px;
+        }
+
+        .sidebar-nav {
+            padding: 16px 12px;
+            flex: 1;
+        }
+
+        .nav-section {
+            margin-bottom: 24px;
+        }
+
+        .nav-section-label {
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--text-muted);
+            padding: 0 8px;
+            margin-bottom: 8px;
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 12px;
+            border-radius: 8px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.15s ease;
+            cursor: pointer;
+            position: relative;
+        }
+
+        .nav-item:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        .nav-item.active {
+            background: var(--accent-subtle);
+            color: var(--accent-primary);
+        }
+
+        .nav-item.active::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 3px;
+            height: 20px;
+            background: var(--accent-primary);
+            border-radius: 0 2px 2px 0;
+        }
+
+        .nav-icon {
+            font-size: 18px;
+            width: 24px;
+            text-align: center;
+        }
+
+        .nav-badge {
+            margin-left: auto;
+            background: var(--status-notfall);
+            color: white;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 10px;
+            min-width: 20px;
+            text-align: center;
+        }
+
+        .sidebar-footer {
+            padding: 16px;
+            border-top: 1px solid var(--border-subtle);
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 8px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.15s ease;
+        }
+
+        .user-info:hover {
+            background: var(--bg-hover);
+        }
+
+        .user-avatar {
+            width: 36px;
+            height: 36px;
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--accent-primary);
+        }
+
+        .user-details {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .user-name {
+            font-size: 13px;
+            font-weight: 600;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .user-role {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        /* ===== MAIN CONTENT ===== */
+        .main-content {
+            flex: 1;
+            margin-left: var(--sidebar-width);
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ===== HEADER ===== */
+        .header {
+            height: 64px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-subtle);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 24px;
+            position: sticky;
+            top: 0;
+            z-index: 50;
+        }
+
+        .header-title {
+            font-family: var(--font-display);
+            font-size: 18px;
+            font-weight: 600;
+            letter-spacing: -0.02em;
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            border: none;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            font-family: var(--font-body);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+            color: var(--bg-primary);
+            box-shadow: 0 2px 8px rgba(245, 158, 11, 0.25);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 16px rgba(245, 158, 11, 0.35);
+        }
+
+        .btn-secondary {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-visible);
+        }
+
+        .btn-secondary:hover {
+            background: var(--bg-hover);
+            border-color: var(--text-muted);
+        }
+
+        /* ===== STATS GRID ===== */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            padding: 24px;
+        }
+
+        .stat-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            padding: 20px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .stat-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: var(--stat-color, var(--accent-primary));
+        }
+
+        .stat-card.notfall { --stat-color: var(--status-notfall); }
+        .stat-card.dringend { --stat-color: var(--status-dringend); }
+        .stat-card.normal { --stat-color: var(--status-normal); }
+
+        .stat-label {
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 8px;
+        }
+
+        .stat-value {
+            font-family: var(--font-display);
+            font-size: 32px;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            color: var(--text-primary);
+        }
+
+        .stat-change {
+            font-size: 12px;
+            color: var(--status-normal);
+            margin-top: 8px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        /* ===== CONTENT AREA ===== */
+        .content-area {
+            flex: 1;
+            padding: 0 24px 24px;
+            display: flex;
+            gap: 24px;
+        }
+
+        /* ===== JOBS LIST ===== */
+        .jobs-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+
+        .panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+        }
+
+        .panel-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .filters {
+            display: flex;
+            gap: 8px;
+        }
+
+        .filter-select {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-visible);
+            border-radius: 6px;
+            padding: 6px 12px;
+            font-size: 12px;
+            color: var(--text-primary);
+            font-family: var(--font-body);
+            cursor: pointer;
+        }
+
+        .filter-select:focus {
+            outline: none;
+            border-color: var(--accent-primary);
+        }
+
+        .search-input {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-visible);
+            border-radius: 6px;
+            padding: 6px 12px 6px 32px;
+            font-size: 12px;
+            color: var(--text-primary);
+            font-family: var(--font-body);
+            width: 200px;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.35-4.35'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: 10px center;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: var(--accent-primary);
+        }
+
+        .jobs-list {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            overflow: hidden;
+            flex: 1;
+        }
+
+        .job-item {
+            display: grid;
+            grid-template-columns: auto 1fr auto auto;
+            gap: 16px;
+            align-items: center;
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border-subtle);
+            cursor: pointer;
+            transition: background 0.15s ease;
+        }
+
+        .job-item:last-child {
+            border-bottom: none;
+        }
+
+        .job-item:hover {
+            background: var(--bg-hover);
+        }
+
+        .job-item.selected {
+            background: var(--accent-subtle);
+        }
+
+        .job-urgency {
+            width: 8px;
+            height: 40px;
+            border-radius: 4px;
+        }
+
+        .job-urgency.notfall { background: var(--status-notfall); }
+        .job-urgency.dringend { background: var(--status-dringend); }
+        .job-urgency.normal { background: var(--status-normal); }
+        .job-urgency.routine { background: var(--status-routine); }
+
+        .job-info {
+            min-width: 0;
+        }
+
+        .job-number {
+            font-family: var(--font-display);
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--accent-primary);
+            margin-bottom: 4px;
+        }
+
+        .job-title {
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-bottom: 4px;
+        }
+
+        .job-customer {
+            font-size: 12px;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .job-meta {
+            text-align: right;
+        }
+
+        .job-time {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-bottom: 4px;
+        }
+
+        .job-status {
+            display: inline-block;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 4px 10px;
+            border-radius: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+
+        .job-status.angefragt { background: var(--status-dringend-bg); color: var(--status-dringend); }
+        .job-status.geplant { background: rgba(59, 130, 246, 0.12); color: #3b82f6; }
+        .job-status.in-arbeit { background: var(--status-normal-bg); color: var(--status-normal); }
+        .job-status.fertig { background: var(--status-routine-bg); color: var(--status-routine); }
+
+        .job-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .job-action-btn {
+            width: 32px;
+            height: 32px;
+            border-radius: 6px;
+            border: 1px solid var(--border-visible);
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.15s ease;
+        }
+
+        .job-action-btn:hover {
+            border-color: var(--accent-primary);
+            color: var(--accent-primary);
+        }
+
+        /* ===== DETAIL PANEL ===== */
+        .detail-panel {
+            width: var(--detail-width);
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            max-height: calc(100vh - 180px);
+            position: sticky;
+            top: 88px;
+        }
+
+        .detail-panel.hidden {
+            display: none;
+        }
+
+        .detail-header {
+            padding: 20px;
+            border-bottom: 1px solid var(--border-subtle);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .detail-job-number {
+            font-family: var(--font-display);
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--accent-primary);
+        }
+
+        .detail-close {
+            width: 28px;
+            height: 28px;
+            border-radius: 6px;
+            border: none;
+            background: var(--bg-tertiary);
+            color: var(--text-muted);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.15s ease;
+        }
+
+        .detail-close:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        .detail-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+        }
+
+        .detail-section {
+            margin-bottom: 24px;
+        }
+
+        .detail-section:last-child {
+            margin-bottom: 0;
+        }
+
+        .section-label {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-muted);
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .detail-description {
+            font-size: 14px;
+            line-height: 1.6;
+            color: var(--text-primary);
+            background: var(--bg-tertiary);
+            padding: 12px 16px;
+            border-radius: 8px;
+            border: 1px solid var(--border-subtle);
+        }
+
+        .detail-tags {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .detail-tag {
+            font-size: 12px;
+            font-weight: 500;
+            padding: 6px 12px;
+            border-radius: 6px;
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+            border: 1px solid var(--border-subtle);
+        }
+
+        .detail-tag.urgency {
+            background: var(--status-dringend-bg);
+            color: var(--status-dringend);
+            border-color: transparent;
+        }
+
+        .customer-card {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-subtle);
+            border-radius: 8px;
+            padding: 16px;
+        }
+
+        .customer-name {
+            font-size: 15px;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+
+        .customer-detail {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+
+        .customer-detail:last-child {
+            margin-bottom: 0;
+        }
+
+        .customer-detail-icon {
+            width: 16px;
+            color: var(--text-muted);
+        }
+
+        /* ===== TRANSCRIPT ===== */
+        .transcript-container {
+            background: var(--bg-primary);
+            border: 1px solid var(--border-subtle);
+            border-radius: 8px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .transcript-msg {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .transcript-msg:last-child {
+            border-bottom: none;
+        }
+
+        .transcript-msg.user {
+            background: var(--bg-tertiary);
+        }
+
+        .msg-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 6px;
+        }
+
+        .msg-role {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .msg-role.user {
+            color: var(--accent-primary);
+        }
+
+        .msg-role.assistant {
+            color: var(--text-muted);
+        }
+
+        .msg-time {
+            font-size: 10px;
+            color: var(--text-muted);
+            font-family: var(--font-display);
+        }
+
+        .msg-text {
+            font-size: 13px;
+            line-height: 1.5;
+            color: var(--text-primary);
+        }
+
+        .msg-lang {
+            display: inline-block;
+            font-size: 9px;
+            font-weight: 600;
+            padding: 2px 6px;
+            border-radius: 4px;
+            background: var(--bg-hover);
+            color: var(--text-muted);
+            margin-left: 8px;
+            text-transform: uppercase;
+        }
+
+        /* ===== DETAIL ACTIONS ===== */
+        .detail-actions {
+            padding: 16px 20px;
+            border-top: 1px solid var(--border-subtle);
+            display: flex;
+            gap: 12px;
+        }
+
+        .detail-actions .btn {
+            flex: 1;
+            justify-content: center;
+        }
+
+        /* ===== EMPTY STATE ===== */
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 60px 40px;
+            text-align: center;
+        }
+
+        .empty-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+            opacity: 0.3;
+        }
+
+        .empty-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+
+        .empty-text {
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+
+        /* ===== TOAST NOTIFICATIONS ===== */
+        .toast-container {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .toast {
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-visible);
+            border-radius: 10px;
+            padding: 14px 18px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+            animation: slideIn 0.3s ease;
+            min-width: 280px;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(100%);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .toast-icon {
+            font-size: 18px;
+        }
+
+        .toast-content {
+            flex: 1;
+        }
+
+        .toast-title {
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 2px;
+        }
+
+        .toast-message {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        /* ===== LOADING ===== */
+        .loading-spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid var(--border-visible);
+            border-top-color: var(--accent-primary);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* ===== LIVE INDICATOR ===== */
+        .live-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .live-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--status-normal);
+            border-radius: 50%;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        /* ===== RESPONSIVE ===== */
+        @media (max-width: 1200px) {
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .detail-panel {
+                position: fixed;
+                right: 0;
+                top: 0;
+                bottom: 0;
+                border-radius: 0;
+                max-height: 100vh;
+                z-index: 200;
+                box-shadow: -8px 0 32px rgba(0, 0, 0, 0.3);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="brand">
+                    <div class="brand-icon">⚡</div>
+                    <div>
+                        <div class="brand-text">ELEKTRO-BETRIEB</div>
+                        <div class="brand-sub">Auftragsverwaltung</div>
+                    </div>
+                </div>
+            </div>
+
+            <nav class="sidebar-nav">
+                <div class="nav-section">
+                    <div class="nav-section-label">Hauptmenü</div>
+                    <a class="nav-item active" data-view="dashboard">
+                        <span class="nav-icon">📊</span>
+                        <span>Übersicht</span>
+                    </a>
+                    <a class="nav-item" data-view="jobs">
+                        <span class="nav-icon">📋</span>
+                        <span>Aufträge</span>
+                        <span class="nav-badge" id="jobs-badge">0</span>
+                    </a>
+                    <a class="nav-item" data-view="calendar">
+                        <span class="nav-icon">📅</span>
+                        <span>Kalender</span>
+                    </a>
+                    <a class="nav-item" data-view="customers">
+                        <span class="nav-icon">👥</span>
+                        <span>Kunden</span>
+                    </a>
+                </div>
+
+                <div class="nav-section">
+                    <div class="nav-section-label">System</div>
+                    <a class="nav-item" data-view="voice-demo" onclick="window.open('/static/voice-demo.html', '_blank')">
+                        <span class="nav-icon">🎤</span>
+                        <span>Sprachassistent</span>
+                    </a>
+                    <a class="nav-item" data-view="settings">
+                        <span class="nav-icon">⚙️</span>
+                        <span>Einstellungen</span>
+                    </a>
+                </div>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="user-info">
+                    <div class="user-avatar">MK</div>
+                    <div class="user-details">
+                        <div class="user-name">Max Klein</div>
+                        <div class="user-role">Administrator</div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Header -->
+            <header class="header">
+                <h1 class="header-title">Übersicht</h1>
+                <div class="header-actions">
+                    <div class="live-indicator">
+                        <div class="live-dot"></div>
+                        <span>Live-Updates aktiv</span>
+                    </div>
+                    <button class="btn btn-secondary" onclick="loadJobs()">
+                        🔄 Aktualisieren
+                    </button>
+                    <button class="btn btn-primary" onclick="window.open('/static/voice-demo.html', '_blank')">
+                        ⚡ Neuer Auftrag
+                    </button>
+                </div>
+            </header>
+
+            <!-- Stats (Dashboard View) -->
+            <div class="stats-grid view-content" data-view="dashboard">
+                <div class="stat-card">
+                    <div class="stat-label">Neue Aufträge</div>
+                    <div class="stat-value" id="stat-new">-</div>
+                    <div class="stat-change">↑ Heute</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Termine heute</div>
+                    <div class="stat-value" id="stat-today">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Offene Aufträge</div>
+                    <div class="stat-value" id="stat-open">-</div>
+                </div>
+                <div class="stat-card notfall">
+                    <div class="stat-label">Notfälle</div>
+                    <div class="stat-value" id="stat-emergency">-</div>
+                </div>
+            </div>
+
+            <!-- Content -->
+            <div class="content-area view-content" data-view="dashboard">
+                <!-- Jobs List -->
+                <div class="jobs-panel">
+                    <div class="panel-header">
+                        <div class="panel-title">
+                            📋 Aktuelle Aufträge
+                        </div>
+                        <div class="filters">
+                            <select class="filter-select" id="filter-status" onchange="filterJobs()">
+                                <option value="">Alle Status</option>
+                                <option value="requested">Angefragt</option>
+                                <option value="scheduled">Geplant</option>
+                                <option value="in_progress">In Arbeit</option>
+                                <option value="completed">Abgeschlossen</option>
+                            </select>
+                            <select class="filter-select" id="filter-urgency" onchange="filterJobs()">
+                                <option value="">Alle Dringend</option>
+                                <option value="notfall">Notfall</option>
+                                <option value="dringend">Dringend</option>
+                                <option value="normal">Normal</option>
+                            </select>
+                            <input type="text" class="search-input" id="search-input" placeholder="Suchen..." oninput="filterJobs()">
+                        </div>
+                    </div>
+
+                    <div class="jobs-list" id="jobs-list">
+                        <div class="empty-state">
+                            <div class="empty-icon">📋</div>
+                            <div class="empty-title">Laden...</div>
+                            <div class="empty-text">Aufträge werden geladen</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Detail Panel -->
+                <div class="detail-panel hidden" id="detail-panel">
+                    <div class="detail-header">
+                        <span class="detail-job-number" id="detail-job-number">JOB-2024-001</span>
+                        <button class="detail-close" onclick="closeDetail()">✕</button>
+                    </div>
+
+                    <div class="detail-content">
+                        <div class="detail-section">
+                            <div class="section-label">📋 Auftrag</div>
+                            <div class="detail-description" id="detail-description">
+                                Laden...
+                            </div>
+                            <div class="detail-tags" style="margin-top: 12px;">
+                                <span class="detail-tag" id="detail-status">Status</span>
+                                <span class="detail-tag urgency" id="detail-urgency">Dringend</span>
+                            </div>
+                        </div>
+
+                        <div class="detail-section">
+                            <div class="section-label">👤 Kunde</div>
+                            <div class="customer-card">
+                                <div class="customer-name" id="detail-customer-name">Laden...</div>
+                                <div class="customer-detail">
+                                    <span class="customer-detail-icon">📞</span>
+                                    <span id="detail-customer-phone">-</span>
+                                </div>
+                                <div class="customer-detail">
+                                    <span class="customer-detail-icon">📍</span>
+                                    <span id="detail-customer-address">-</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="detail-section" id="transcript-section">
+                            <div class="section-label">🎤 Gesprächsverlauf</div>
+                            <div class="transcript-container" id="transcript-container">
+                                <div class="empty-state" style="padding: 24px;">
+                                    <div class="empty-text">Kein Gespräch aufgezeichnet</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="detail-actions">
+                        <button class="btn btn-secondary" onclick="sendETANotification()">📲 ETA senden</button>
+                        <button class="btn btn-secondary" onclick="sendFeedbackRequest()">⭐ Bewertung anfordern</button>
+                        <button class="btn btn-primary" onclick="startJob()">▶️ Starten</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Calendar View -->
+            <div class="content-area view-content" data-view="calendar" style="display: none;">
+                <div class="jobs-panel" style="max-width: 100%;">
+                    <div class="panel-header">
+                        <div class="panel-title">📅 Kalenderansicht</div>
+                        <div class="filters">
+                            <button class="btn btn-secondary" onclick="loadSlots()">🔄 Aktualisieren</button>
+                        </div>
+                    </div>
+                    <div class="jobs-list" id="calendar-list">
+                        <div class="empty-state">
+                            <div class="loading-spinner"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Customers View -->
+            <div class="content-area view-content" data-view="customers" style="display: none;">
+                <div class="jobs-panel" style="max-width: 100%;">
+                    <div class="panel-header">
+                        <div class="panel-title">👥 Kundenverwaltung</div>
+                        <div class="filters">
+                            <input type="text" class="search-input" placeholder="Kunde suchen..." style="width: 300px;">
+                        </div>
+                    </div>
+                    <div class="jobs-list" id="customers-list">
+                        <div class="empty-state">
+                            <div class="empty-icon">👥</div>
+                            <div class="empty-title">Kundendaten</div>
+                            <div class="empty-text">Kunden werden aus Aufträgen automatisch erfasst</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Jobs Full View -->
+            <div class="content-area view-content" data-view="jobs" style="display: none;">
+                <div class="jobs-panel" style="max-width: 100%;">
+                    <div class="panel-header">
+                        <div class="panel-title">📋 Alle Aufträge</div>
+                        <div class="filters">
+                            <select class="filter-select" id="filter-status-full" onchange="filterJobsFull()">
+                                <option value="">Alle Status</option>
+                                <option value="requested">Angefragt</option>
+                                <option value="scheduled">Geplant</option>
+                                <option value="in_progress">In Arbeit</option>
+                                <option value="completed">Abgeschlossen</option>
+                            </select>
+                            <select class="filter-select" id="filter-urgency-full" onchange="filterJobsFull()">
+                                <option value="">Alle Dringend</option>
+                                <option value="notfall">Notfall</option>
+                                <option value="dringend">Dringend</option>
+                                <option value="normal">Normal</option>
+                            </select>
+                            <input type="text" class="search-input" id="search-input-full" placeholder="Suchen..." oninput="filterJobsFull()" style="width: 250px;">
+                            <button class="btn btn-secondary" onclick="loadJobs()">🔄 Aktualisieren</button>
+                        </div>
+                    </div>
+                    <div class="jobs-list" id="jobs-list-full">
+                        <div class="empty-state">
+                            <div class="loading-spinner"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Settings View -->
+            <div class="content-area view-content" data-view="settings" style="display: none;">
+                <div class="jobs-panel" style="max-width: 600px;">
+                    <div class="panel-header">
+                        <div class="panel-title">⚙️ Einstellungen</div>
+                    </div>
+                    <div class="jobs-list">
+                        <div style="padding: 24px;">
+                            <div class="detail-section">
+                                <div class="section-label">🏢 Betriebsdaten</div>
+                                <div class="customer-card">
+                                    <div class="customer-detail">
+                                        <span class="customer-detail-icon">🏷️</span>
+                                        <span>Elektro-Betrieb Demo GmbH</span>
+                                    </div>
+                                    <div class="customer-detail">
+                                        <span class="customer-detail-icon">📍</span>
+                                        <span>Musterstraße 1, 10115 Berlin</span>
+                                    </div>
+                                    <div class="customer-detail">
+                                        <span class="customer-detail-icon">📞</span>
+                                        <span>+49 30 12345678</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="detail-section" style="margin-top: 24px;">
+                                <div class="section-label">🤖 KI-Assistent</div>
+                                <div class="customer-card">
+                                    <div class="customer-detail">
+                                        <span class="customer-detail-icon">✅</span>
+                                        <span>Sprachassistent aktiv</span>
+                                    </div>
+                                    <div class="customer-detail">
+                                        <span class="customer-detail-icon">🌐</span>
+                                        <span>Sprachen: DE, RU, TR, EN</span>
+                                    </div>
+                                    <div class="customer-detail">
+                                        <span class="customer-detail-icon">⚡</span>
+                                        <span>Groq LLM (Llama 3)</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="detail-section" style="margin-top: 24px;">
+                                <div class="section-label">📊 API Status</div>
+                                <div class="customer-card">
+                                    <div class="customer-detail">
+                                        <span class="customer-detail-icon">🟢</span>
+                                        <span id="api-status">Verbunden</span>
+                                    </div>
+                                    <div class="customer-detail">
+                                        <span class="customer-detail-icon">🔗</span>
+                                        <span>/api/v1/elektro</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <script>
+        // ===== STATE =====
+        let allJobs = [];
+        let selectedJobId = null;
+
+        // ===== API =====
+        const API_BASE = '/api/v1/elektro';
+
+        async function fetchAPI(endpoint, options = {}) {
+            try {
+                const response = await fetch(`${API_BASE}${endpoint}`, {
+                    headers: { 'Content-Type': 'application/json' },
+                    ...options
+                });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                return await response.json();
+            } catch (error) {
+                console.error('API Error:', error);
+                showToast('Fehler', error.message, 'error');
+                return null;
+            }
+        }
+
+        // ===== LOAD DATA =====
+        async function loadStats() {
+            const stats = await fetchAPI('/stats?days_back=7');
+            if (stats) {
+                document.getElementById('stat-new').textContent = stats.today_jobs || 0;
+                document.getElementById('stat-today').textContent = stats.today_jobs || 0;
+                document.getElementById('stat-open').textContent = stats.open_jobs || 0;
+                document.getElementById('stat-emergency').textContent = stats.emergencies || 0;
+
+                // Update badge
+                document.getElementById('jobs-badge').textContent = stats.open_jobs || 0;
+            }
+        }
+
+        async function loadJobs() {
+            const container = document.getElementById('jobs-list');
+            container.innerHTML = '<div class="empty-state"><div class="loading-spinner"></div></div>';
+
+            const data = await fetchAPI('/jobs?days_back=30&limit=100');
+            if (data && data.jobs) {
+                allJobs = data.jobs;
+                renderJobs(allJobs);
+            } else {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-icon">📋</div>
+                        <div class="empty-title">Keine Aufträge</div>
+                        <div class="empty-text">Noch keine Aufträge vorhanden</div>
+                    </div>
+                `;
+            }
+        }
+
+        function renderJobs(jobs) {
+            const container = document.getElementById('jobs-list');
+
+            if (!jobs || jobs.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-icon">🔍</div>
+                        <div class="empty-title">Keine Ergebnisse</div>
+                        <div class="empty-text">Keine Aufträge gefunden</div>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = jobs.map(job => {
+                const urgency = job.urgency || 'normal';
+                const status = job.status || 'requested';
+                const statusLabel = {
+                    'requested': 'Angefragt',
+                    'scheduled': 'Geplant',
+                    'in_progress': 'In Arbeit',
+                    'completed': 'Fertig',
+                    'cancelled': 'Storniert'
+                }[status] || status;
+
+                const statusClass = {
+                    'requested': 'angefragt',
+                    'scheduled': 'geplant',
+                    'in_progress': 'in-arbeit',
+                    'completed': 'fertig'
+                }[status] || 'angefragt';
+
+                const customerName = job.customer?.name || 'Unbekannt';
+                const createdAt = job.created_at ? new Date(job.created_at).toLocaleString('de-DE', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                }) : '-';
+
+                return `
+                    <div class="job-item ${selectedJobId === job.id ? 'selected' : ''}" onclick="selectJob('${job.id}')">
+                        <div class="job-urgency ${urgency}"></div>
+                        <div class="job-info">
+                            <div class="job-number">${job.job_number || 'N/A'}</div>
+                            <div class="job-title">${job.title || job.description?.substring(0, 50) || 'Kein Titel'}</div>
+                            <div class="job-customer">👤 ${customerName}</div>
+                        </div>
+                        <div class="job-meta">
+                            <div class="job-time">${createdAt}</div>
+                            <span class="job-status ${statusClass}">${statusLabel}</span>
+                        </div>
+                        <div class="job-actions">
+                            <button class="job-action-btn" title="Bearbeiten" onclick="event.stopPropagation(); editJob('${job.id}')">✏️</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function filterJobs() {
+            const status = document.getElementById('filter-status').value;
+            const urgency = document.getElementById('filter-urgency').value;
+            const search = document.getElementById('search-input').value.toLowerCase();
+
+            let filtered = allJobs;
+
+            if (status) {
+                filtered = filtered.filter(j => j.status === status);
+            }
+            if (urgency) {
+                filtered = filtered.filter(j => j.urgency === urgency);
+            }
+            if (search) {
+                filtered = filtered.filter(j =>
+                    (j.job_number || '').toLowerCase().includes(search) ||
+                    (j.title || '').toLowerCase().includes(search) ||
+                    (j.description || '').toLowerCase().includes(search) ||
+                    (j.customer?.name || '').toLowerCase().includes(search)
+                );
+            }
+
+            renderJobs(filtered);
+        }
+
+        // ===== JOB DETAIL =====
+        async function selectJob(jobId) {
+            selectedJobId = jobId;
+            renderJobs(allJobs.filter(j => {
+                const status = document.getElementById('filter-status').value;
+                const urgency = document.getElementById('filter-urgency').value;
+                const search = document.getElementById('search-input').value.toLowerCase();
+
+                let match = true;
+                if (status) match = match && j.status === status;
+                if (urgency) match = match && j.urgency === urgency;
+                if (search) {
+                    match = match && (
+                        (j.job_number || '').toLowerCase().includes(search) ||
+                        (j.title || '').toLowerCase().includes(search) ||
+                        (j.customer?.name || '').toLowerCase().includes(search)
+                    );
+                }
+                return match;
+            }));
+
+            const panel = document.getElementById('detail-panel');
+            panel.classList.remove('hidden');
+
+            // Load full detail
+            const job = await fetchAPI(`/jobs/${jobId}`);
+            if (job) {
+                renderJobDetail(job);
+            }
+        }
+
+        function renderJobDetail(job) {
+            document.getElementById('detail-job-number').textContent = job.job_number || 'N/A';
+            document.getElementById('detail-description').textContent = job.description || 'Keine Beschreibung';
+
+            const statusLabel = {
+                'requested': 'Angefragt',
+                'scheduled': 'Geplant',
+                'in_progress': 'In Arbeit',
+                'completed': 'Fertig'
+            }[job.status] || job.status;
+            document.getElementById('detail-status').textContent = statusLabel;
+
+            const urgencyLabel = {
+                'notfall': 'Notfall',
+                'dringend': 'Dringend',
+                'normal': 'Normal',
+                'routine': 'Routine'
+            }[job.urgency] || job.urgency;
+            document.getElementById('detail-urgency').textContent = urgencyLabel;
+
+            // Customer
+            if (job.customer) {
+                document.getElementById('detail-customer-name').textContent = job.customer.name || 'Unbekannt';
+                document.getElementById('detail-customer-phone').textContent = job.customer.phone || '-';
+
+                const address = [job.customer.street, job.customer.zip, job.customer.city]
+                    .filter(Boolean).join(', ');
+                document.getElementById('detail-customer-address').textContent = address || '-';
+            }
+
+            // Transcript
+            const transcriptContainer = document.getElementById('transcript-container');
+            if (job.transcript && job.transcript.turns && job.transcript.turns.length > 0) {
+                transcriptContainer.innerHTML = job.transcript.turns.map(turn => {
+                    const isUser = turn.role === 'user';
+                    const time = turn.timestamp ? new Date(turn.timestamp).toLocaleTimeString('de-DE', {
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    }) : '';
+                    const lang = turn.language?.toUpperCase() || 'DE';
+
+                    return `
+                        <div class="transcript-msg ${isUser ? 'user' : 'assistant'}">
+                            <div class="msg-header">
+                                <span class="msg-role ${turn.role}">${isUser ? 'Kunde' : 'Assistent'}</span>
+                                <span class="msg-time">${time}</span>
+                            </div>
+                            <div class="msg-text">${turn.content}${isUser ? `<span class="msg-lang">${lang}</span>` : ''}</div>
+                        </div>
+                    `;
+                }).join('');
+            } else {
+                transcriptContainer.innerHTML = `
+                    <div class="empty-state" style="padding: 24px;">
+                        <div class="empty-text">Kein Gespräch aufgezeichnet</div>
+                    </div>
+                `;
+            }
+        }
+
+        function closeDetail() {
+            selectedJobId = null;
+            document.getElementById('detail-panel').classList.add('hidden');
+            filterJobs();
+        }
+
+        function editJob(jobId) {
+            showToast('Info', 'Bearbeitung wird geöffnet...', 'info');
+        }
+
+        function startJob() {
+            if (!selectedJobId) {
+                showToast('Fehler', 'Kein Auftrag ausgewählt', 'error');
+                return;
+            }
+            showToast('Info', 'Auftrag wird gestartet...', 'info');
+        }
+
+        // ===== NOTIFICATIONS =====
+        async function sendETANotification() {
+            if (!selectedJobId) {
+                showToast('Fehler', 'Kein Auftrag ausgewählt', 'error');
+                return;
+            }
+
+            // Prompt for ETA minutes
+            const eta = prompt('ETA in Minuten (1-120):', '15');
+            if (!eta) return;
+
+            const etaMinutes = parseInt(eta);
+            if (isNaN(etaMinutes) || etaMinutes < 1 || etaMinutes > 120) {
+                showToast('Fehler', 'Bitte eine gültige Zahl zwischen 1 und 120 eingeben', 'error');
+                return;
+            }
+
+            try {
+                const result = await fetchAPI(`/jobs/${selectedJobId}/notify/eta`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ eta_minutes: etaMinutes })
+                });
+
+                if (result && result.success) {
+                    showToast('Erfolg', `ETA-SMS gesendet: Ankunft in ${etaMinutes} Min.`, 'success');
+                } else {
+                    showToast('Fehler', result?.error || 'SMS konnte nicht gesendet werden', 'error');
+                }
+            } catch (error) {
+                console.error('ETA notification error:', error);
+                showToast('Fehler', 'SMS konnte nicht gesendet werden', 'error');
+            }
+        }
+
+        async function sendFeedbackRequest() {
+            if (!selectedJobId) {
+                showToast('Fehler', 'Kein Auftrag ausgewählt', 'error');
+                return;
+            }
+
+            try {
+                const result = await fetchAPI(`/jobs/${selectedJobId}/notify/feedback`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                });
+
+                if (result && result.success) {
+                    showToast('Erfolg', 'Bewertungsanfrage gesendet!', 'success');
+                } else {
+                    showToast('Fehler', result?.error || 'Anfrage konnte nicht gesendet werden', 'error');
+                }
+            } catch (error) {
+                console.error('Feedback request error:', error);
+                showToast('Fehler', 'Anfrage konnte nicht gesendet werden', 'error');
+            }
+        }
+
+        async function sendAppointmentConfirmation() {
+            if (!selectedJobId) {
+                showToast('Fehler', 'Kein Auftrag ausgewählt', 'error');
+                return;
+            }
+
+            try {
+                const result = await fetchAPI(`/jobs/${selectedJobId}/notify/confirmation`, {
+                    method: 'POST'
+                });
+
+                if (result && result.success) {
+                    showToast('Erfolg', 'Terminbestätigung gesendet!', 'success');
+                } else {
+                    showToast('Fehler', result?.error || 'Bestätigung konnte nicht gesendet werden', 'error');
+                }
+            } catch (error) {
+                console.error('Confirmation error:', error);
+                showToast('Fehler', 'Bestätigung konnte nicht gesendet werden', 'error');
+            }
+        }
+
+        // ===== TOAST =====
+        function showToast(title, message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const icons = {
+                'success': '✅',
+                'error': '❌',
+                'info': 'ℹ️',
+                'warning': '⚠️'
+            };
+
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.innerHTML = `
+                <span class="toast-icon">${icons[type] || icons.info}</span>
+                <div class="toast-content">
+                    <div class="toast-title">${title}</div>
+                    <div class="toast-message">${message}</div>
+                </div>
+            `;
+
+            container.appendChild(toast);
+
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateX(100%)';
+                setTimeout(() => toast.remove(), 300);
+            }, 4000);
+        }
+
+        // ===== WEBSOCKET =====
+        function initWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const ws = new WebSocket(`${protocol}//${window.location.host}/api/v1/ws/jobs`);
+
+            ws.onopen = () => {
+                console.log('WebSocket connected');
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'job_created' && data.trade_category === 'elektro') {
+                        showToast('Neuer Auftrag', data.job_number || 'Neuer Auftrag eingegangen', 'success');
+                        loadJobs();
+                        loadStats();
+                    }
+                } catch (e) {
+                    console.error('WebSocket message error:', e);
+                }
+            };
+
+            ws.onclose = () => {
+                console.log('WebSocket disconnected, reconnecting...');
+                setTimeout(initWebSocket, 3000);
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+            };
+        }
+
+        // ===== NAV =====
+        let currentView = 'dashboard';
+
+        function switchView(view) {
+            currentView = view;
+
+            // Update nav active state
+            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+            const activeNav = document.querySelector(`.nav-item[data-view="${view}"]`);
+            if (activeNav) activeNav.classList.add('active');
+
+            // Update header title
+            document.querySelector('.header-title').textContent = {
+                'dashboard': 'Übersicht',
+                'jobs': 'Aufträge',
+                'calendar': 'Kalender',
+                'customers': 'Kunden',
+                'settings': 'Einstellungen'
+            }[view] || 'Übersicht';
+
+            // Show/hide views
+            document.querySelectorAll('.view-content').forEach(el => {
+                el.style.display = el.dataset.view === view ? '' : 'none';
+            });
+
+            // Load view-specific data
+            if (view === 'calendar') {
+                loadSlots();
+            } else if (view === 'jobs') {
+                renderJobsFull(allJobs);
+            } else if (view === 'customers') {
+                loadCustomers();
+            }
+        }
+
+        document.querySelectorAll('.nav-item[data-view]').forEach(item => {
+            item.addEventListener('click', function(e) {
+                // Skip if it has onclick (like voice-demo)
+                if (this.getAttribute('onclick')) return;
+                e.preventDefault();
+                switchView(this.dataset.view);
+            });
+        });
+
+        // ===== CALENDAR =====
+        async function loadSlots() {
+            const container = document.getElementById('calendar-list');
+            container.innerHTML = '<div class="empty-state"><div class="loading-spinner"></div></div>';
+
+            const slots = await fetchAPI('/slots');
+            if (slots && slots.length > 0) {
+                container.innerHTML = slots.map(slot => {
+                    const start = new Date(slot.start);
+                    const dateStr = start.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit' });
+                    const timeStr = start.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+                    const endTime = new Date(slot.end).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+
+                    return `
+                        <div class="job-item">
+                            <div class="job-urgency normal"></div>
+                            <div class="job-info">
+                                <div class="job-number">${dateStr}</div>
+                                <div class="job-title">${timeStr} - ${endTime}</div>
+                                <div class="job-customer">⏱️ ${slot.duration_minutes} Minuten</div>
+                            </div>
+                            <div class="job-meta">
+                                <span class="job-status geplant">Verfügbar</span>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } else {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-icon">📅</div>
+                        <div class="empty-title">Keine Termine</div>
+                        <div class="empty-text">Keine verfügbaren Zeitfenster</div>
+                    </div>
+                `;
+            }
+        }
+
+        // ===== CUSTOMERS =====
+        function loadCustomers() {
+            const container = document.getElementById('customers-list');
+
+            // Extract unique customers from jobs
+            const customers = {};
+            allJobs.forEach(job => {
+                if (job.address?.city || job.address?.street) {
+                    const key = `${job.address?.street || ''}-${job.address?.zip || ''}`;
+                    if (!customers[key]) {
+                        customers[key] = {
+                            address: job.address,
+                            jobs: []
+                        };
+                    }
+                    customers[key].jobs.push(job);
+                }
+            });
+
+            const customerList = Object.values(customers);
+            if (customerList.length > 0) {
+                container.innerHTML = customerList.map(c => {
+                    const addr = [c.address?.street, c.address?.zip, c.address?.city].filter(Boolean).join(', ');
+                    return `
+                        <div class="job-item">
+                            <div class="job-urgency normal"></div>
+                            <div class="job-info">
+                                <div class="job-number">📍 ${c.address?.city || 'Unbekannt'}</div>
+                                <div class="job-title">${addr || 'Keine Adresse'}</div>
+                                <div class="job-customer">📋 ${c.jobs.length} Auftrag(e)</div>
+                            </div>
+                            <div class="job-meta">
+                                <span class="job-status geplant">Aktiv</span>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } else {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-icon">👥</div>
+                        <div class="empty-title">Keine Kunden</div>
+                        <div class="empty-text">Kunden werden aus Aufträgen erfasst</div>
+                    </div>
+                `;
+            }
+        }
+
+        // ===== JOBS FULL VIEW =====
+        function renderJobsFull(jobs) {
+            const container = document.getElementById('jobs-list-full');
+
+            if (!jobs || jobs.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-icon">🔍</div>
+                        <div class="empty-title">Keine Ergebnisse</div>
+                        <div class="empty-text">Keine Aufträge gefunden</div>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = jobs.map(job => {
+                const urgency = job.urgency || 'normal';
+                const status = job.status || 'requested';
+                const statusLabel = {
+                    'requested': 'Angefragt',
+                    'scheduled': 'Geplant',
+                    'in_progress': 'In Arbeit',
+                    'completed': 'Fertig',
+                    'cancelled': 'Storniert'
+                }[status] || status;
+
+                const statusClass = {
+                    'requested': 'angefragt',
+                    'scheduled': 'geplant',
+                    'in_progress': 'in-arbeit',
+                    'completed': 'fertig'
+                }[status] || 'angefragt';
+
+                const createdAt = job.created_at ? new Date(job.created_at).toLocaleString('de-DE', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                }) : '-';
+
+                return `
+                    <div class="job-item" onclick="selectJob('${job.id}'); switchView('dashboard');">
+                        <div class="job-urgency ${urgency}"></div>
+                        <div class="job-info">
+                            <div class="job-number">${job.job_number || 'N/A'}</div>
+                            <div class="job-title">${job.title || job.description?.substring(0, 50) || 'Kein Titel'}</div>
+                            <div class="job-customer">📍 ${job.address?.city || 'Keine Adresse'}</div>
+                        </div>
+                        <div class="job-meta">
+                            <div class="job-time">${createdAt}</div>
+                            <span class="job-status ${statusClass}">${statusLabel}</span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function filterJobsFull() {
+            const status = document.getElementById('filter-status-full').value;
+            const urgency = document.getElementById('filter-urgency-full').value;
+            const search = document.getElementById('search-input-full').value.toLowerCase();
+
+            let filtered = allJobs;
+
+            if (status) filtered = filtered.filter(j => j.status === status);
+            if (urgency) filtered = filtered.filter(j => j.urgency === urgency);
+            if (search) {
+                filtered = filtered.filter(j =>
+                    (j.job_number || '').toLowerCase().includes(search) ||
+                    (j.title || '').toLowerCase().includes(search) ||
+                    (j.description || '').toLowerCase().includes(search)
+                );
+            }
+
+            renderJobsFull(filtered);
+        }
+
+        // ===== INIT =====
+        document.addEventListener('DOMContentLoaded', () => {
+            loadStats();
+            loadJobs();
+            initWebSocket();
+
+            // Auto-refresh every 30s
+            setInterval(() => {
+                loadStats();
+            }, 30000);
+        });
+    </script>
+</body>
+</html>

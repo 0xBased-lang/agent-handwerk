@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
@@ -705,3 +706,402 @@ async def synthesize_speech(request: TTSRequest):
             media_type="audio/mpeg",
             headers={"X-TTS-Error": str(e)}
         )
+
+
+# =============================================================================
+# CONVERSATION API - AI-driven conversation with proper state management
+# =============================================================================
+
+class ConversationRequest(BaseModel):
+    """Conversation request model."""
+    session_id: str
+    message: str
+    language: str = "de"
+
+
+class ConversationResponse(BaseModel):
+    """Conversation response model."""
+    response: str
+    language: str
+    session_id: str
+    conversation_state: str  # greeting, problem_inquiry, details, scheduling, contact_collection, farewell
+    ready_for_contact: bool  # Signal to show contact form
+    urgency: str  # normal, dringend, notfall
+    detected_trade: str | None  # elektro, shk, schlosser, etc.
+
+
+# Conversation sessions with proper state
+_conversation_sessions: dict[str, dict] = {}
+_session_lock = asyncio.Lock()  # Async lock for session access
+
+# Session management constants
+SESSION_TTL_SECONDS = 3600  # 1 hour session timeout
+MAX_SESSIONS = 100  # Maximum concurrent sessions
+MAX_MESSAGES_PER_SESSION = 50  # Limit conversation history
+
+# LLM singleton
+_llm_engine: Any = None
+
+
+def get_llm_engine() -> Any:
+    """Get or create LLM engine (Groq or local fallback)."""
+    global _llm_engine
+
+    if _llm_engine is not None:
+        return _llm_engine
+
+    import os
+
+    # Try Groq first (better quality)
+    groq_key = os.environ.get("GROQ_API_KEY", "")
+    if groq_key:
+        try:
+            from phone_agent.ai.cloud.groq_client import GroqLanguageModel
+            _llm_engine = GroqLanguageModel(
+                api_key=groq_key,
+                model="llama-3.1-8b-instant",
+            )
+            log.info("LLM initialized with Groq")
+            return _llm_engine
+        except Exception as e:
+            log.warning(f"Failed to initialize Groq LLM: {e}")
+
+    # Fallback to local LLM
+    try:
+        from phone_agent.ai.llm import LanguageModel
+        _llm_engine = LanguageModel()
+        _llm_engine.load()
+        log.info("LLM initialized with local model")
+        return _llm_engine
+    except Exception as e:
+        log.warning(f"Failed to initialize local LLM: {e}")
+
+    return None
+
+
+# Enhanced system prompt that controls conversation flow
+CONVERSATION_SYSTEM_PROMPT = """Du bist der Telefonassistent eines Elektro-Notdienstes.
+
+WICHTIGSTE REGEL: Antworte KURZ und PRÄZISE! Maximal 2-3 Sätze pro Antwort.
+Dies ist ein Telefongespräch - keine E-Mail.
+
+GESPRÄCHSABLAUF (DIESE REIHENFOLGE EINHALTEN!):
+1. VERSTEHEN: Erst das Problem vollständig verstehen
+2. NACHFRAGEN: Bei Unklarheiten EINE Nachfrage stellen
+3. DRINGLICHKEIT: Klären ob Notfall oder normaler Termin
+4. LÖSUNG: Erst wenn alles klar ist, Termin/Hilfe anbieten
+5. KONTAKTDATEN: NUR am Ende wenn Kunde einem Termin zugestimmt hat
+
+WICHTIG - NICHT ZU FRÜH NACH KONTAKTDATEN FRAGEN!
+- Erst wenn das Problem verstanden ist
+- Erst wenn der Kunde einem Termin zugestimmt hat
+- Wenn du Kontaktdaten brauchst, sage GENAU: "KONTAKTDATEN_ERFORDERLICH"
+
+BEISPIEL-GESPRÄCH:
+Kunde: "Mein Strom ist ausgefallen"
+Du: "Oh je! Betrifft es das ganze Haus oder nur bestimmte Räume?"
+Kunde: "Das ganze Haus ist dunkel"
+Du: "Haben Sie schon die Sicherungen im Sicherungskasten geprüft?"
+Kunde: "Ja, aber nichts hat geholfen"
+Du: "Verstanden. Wir können heute noch einen Techniker schicken. Passt Ihnen heute Nachmittag?"
+Kunde: "Ja, das wäre gut"
+Du: "KONTAKTDATEN_ERFORDERLICH Sehr gut! Darf ich dann Ihren Namen und Ihre Adresse aufnehmen?"
+
+NOTFÄLLE (Gas, Rauch, Funken):
+- "Verlassen Sie SOFORT das Gebäude! Rufen Sie 112!"
+- Bei Notfällen SOFORT Kontaktdaten anfragen: "KONTAKTDATEN_ERFORDERLICH"
+
+VERBOTEN:
+- Lange Erklärungen
+- Mehrere Fragen gleichzeitig
+- Zu früh nach Kontaktdaten fragen
+- Monologe"""
+
+
+def cleanup_expired_sessions() -> int:
+    """Remove expired sessions and enforce max session limit.
+
+    Returns:
+        Number of sessions removed.
+    """
+    now = time.time()
+    removed = 0
+
+    # Find expired sessions
+    expired = [
+        sid for sid, sess in _conversation_sessions.items()
+        if now - sess.get("last_access", 0) > SESSION_TTL_SECONDS
+    ]
+
+    # Remove expired
+    for sid in expired:
+        del _conversation_sessions[sid]
+        removed += 1
+
+    # Enforce max sessions (remove oldest if over limit)
+    while len(_conversation_sessions) > MAX_SESSIONS:
+        oldest = min(
+            _conversation_sessions.items(),
+            key=lambda x: x[1].get("last_access", 0)
+        )
+        del _conversation_sessions[oldest[0]]
+        removed += 1
+
+    if removed > 0:
+        log.info(f"Session cleanup: removed {removed} sessions, {len(_conversation_sessions)} remaining")
+
+    return removed
+
+
+def get_or_create_session(session_id: str, language: str = "de") -> dict:
+    """Get or create a conversation session with TTL tracking."""
+    now = time.time()
+
+    # Run cleanup periodically (every call, but fast when nothing to clean)
+    cleanup_expired_sessions()
+
+    if session_id not in _conversation_sessions:
+        _conversation_sessions[session_id] = {
+            "messages": [{"role": "system", "content": CONVERSATION_SYSTEM_PROMPT}],
+            "state": "greeting",
+            "language": language,
+            "turn_count": 0,
+            "problem_understood": False,
+            "appointment_agreed": False,
+            "urgency": "normal",
+            "detected_trade": None,
+            "contact_requested": False,
+            "created_at": now,
+            "last_access": now,
+        }
+        log.info(f"Created new session {session_id}, total: {len(_conversation_sessions)}")
+    else:
+        # Update last access time
+        _conversation_sessions[session_id]["last_access"] = now
+
+    return _conversation_sessions[session_id]
+
+
+def add_message_to_session(session: dict, role: str, content: str) -> None:
+    """Add a message to session with history limit enforcement."""
+    session["messages"].append({"role": role, "content": content})
+
+    # Enforce message limit (keep system prompt + last N messages)
+    if len(session["messages"]) > MAX_MESSAGES_PER_SESSION:
+        system_prompt = session["messages"][0]
+        session["messages"] = [system_prompt] + session["messages"][-(MAX_MESSAGES_PER_SESSION - 1):]
+        log.debug(f"Trimmed session messages to {len(session['messages'])}")
+
+
+def detect_urgency(text: str) -> str:
+    """Detect urgency level from user message."""
+    text_lower = text.lower()
+
+    # Emergency keywords
+    emergency_words = ["raucht", "brennt", "feuer", "funken", "brand", "stromschlag",
+                       "explosion", "gasgeruch", "gas riecht", "qualm"]
+    if any(word in text_lower for word in emergency_words):
+        return "notfall"
+
+    # Urgent keywords
+    urgent_words = ["stromausfall", "kein strom", "kein licht", "dunkel", "sicherung",
+                    "fi schalter", "dringend", "sofort", "schnell"]
+    if any(word in text_lower for word in urgent_words):
+        return "dringend"
+
+    return "normal"
+
+
+def detect_trade(text: str) -> str | None:
+    """Detect trade category from user message."""
+    text_lower = text.lower()
+
+    trade_keywords = {
+        "elektro": ["strom", "licht", "elektr", "sicherung", "kabel", "steckdose", "schalter"],
+        "shk": ["heizung", "sanitär", "wasser", "rohr", "bad", "wc", "warmwasser", "heizkörper"],
+        "schlosser": ["tür", "schloss", "schlüssel", "fenster", "ausgesperrt"],
+    }
+
+    for trade, keywords in trade_keywords.items():
+        if any(keyword in text_lower for keyword in keywords):
+            return trade
+
+    return None
+
+
+def analyze_conversation_state(session: dict, response: str) -> tuple[str, bool]:
+    """Analyze conversation state and determine if contact collection is needed.
+
+    Returns:
+        Tuple of (new_state, ready_for_contact)
+    """
+    turn_count = session["turn_count"]
+    urgency = session["urgency"]
+
+    # Check if LLM explicitly requested contact data
+    if "KONTAKTDATEN_ERFORDERLICH" in response:
+        return "contact_collection", True
+
+    # Emergency always triggers contact collection
+    if urgency == "notfall":
+        return "contact_collection", True
+
+    # Analyze response content to determine state
+    response_lower = response.lower()
+
+    # Check for appointment/scheduling language
+    appointment_indicators = ["termin", "techniker schicken", "monteur", "vorbeikommen",
+                             "heute nachmittag", "morgen", "wann passt"]
+    if any(indicator in response_lower for indicator in appointment_indicators):
+        session["appointment_agreed"] = True
+        # Only ready for contact if appointment is being offered AND customer agreed
+        if turn_count >= 3:
+            return "scheduling", False  # Not ready yet, need confirmation
+        return "scheduling", False
+
+    # Check for problem understanding
+    problem_indicators = ["verstanden", "ich verstehe", "das klingt", "also"]
+    if any(indicator in response_lower for indicator in problem_indicators):
+        session["problem_understood"] = True
+        return "details", False
+
+    # Initial greeting/inquiry
+    if turn_count <= 1:
+        return "greeting", False
+
+    # Still gathering information
+    if turn_count <= 3:
+        return "problem_inquiry", False
+
+    return "details", False
+
+
+@router.post("/conversation", response_model=ConversationResponse)
+async def process_conversation(request: ConversationRequest):
+    """Process a conversation turn with AI-driven flow control.
+
+    This endpoint manages the full conversation flow:
+    1. Maintains conversation history per session
+    2. Uses LLM to generate contextual responses
+    3. Determines when contact collection is appropriate
+    4. Returns structured response with state information
+    """
+    session = get_or_create_session(request.session_id, request.language)
+    session["turn_count"] += 1
+
+    # Detect urgency and trade from user message
+    detected_urgency = detect_urgency(request.message)
+    if detected_urgency != "normal":
+        session["urgency"] = detected_urgency
+
+    detected_trade = detect_trade(request.message)
+    if detected_trade:
+        session["detected_trade"] = detected_trade
+
+    # Add user message to history (with limit enforcement)
+    add_message_to_session(session, "user", request.message)
+
+    # Get LLM response
+    llm = get_llm_engine()
+
+    if llm is None:
+        # Fallback response if no LLM available
+        if session["urgency"] == "notfall":
+            response = "Das klingt nach einem Notfall! KONTAKTDATEN_ERFORDERLICH Bitte geben Sie mir schnell Ihre Adresse, damit wir sofort einen Techniker schicken können."
+        elif session["turn_count"] <= 2:
+            response = "Ich verstehe. Können Sie mir mehr dazu erzählen? Seit wann besteht das Problem?"
+        else:
+            response = "Danke für die Details. Wir können einen Termin für Sie vereinbaren. KONTAKTDATEN_ERFORDERLICH Darf ich Ihren Namen und Ihre Adresse aufnehmen?"
+    else:
+        try:
+            # Use LLM with conversation history
+            if hasattr(llm, 'generate_with_history'):
+                response = llm.generate_with_history(session["messages"])
+            elif hasattr(llm, 'generate_with_history_async'):
+                response = await llm.generate_with_history_async(session["messages"])
+            else:
+                # Simple generate fallback
+                response = await llm.generate_async(
+                    prompt=request.message,
+                    system_prompt=CONVERSATION_SYSTEM_PROMPT,
+                )
+            response = response.strip()
+        except Exception as e:
+            log.error(f"LLM error: {e}")
+            response = "Entschuldigung, können Sie das bitte wiederholen?"
+
+    # Analyze conversation state
+    new_state, ready_for_contact = analyze_conversation_state(session, response)
+    session["state"] = new_state
+
+    # Clean the response (remove the marker if present)
+    clean_response = response.replace("KONTAKTDATEN_ERFORDERLICH", "").strip()
+
+    # Add assistant response to history (with limit enforcement)
+    add_message_to_session(session, "assistant", clean_response)
+
+    log.info(
+        "Conversation turn",
+        session_id=request.session_id,
+        turn=session["turn_count"],
+        state=new_state,
+        ready_for_contact=ready_for_contact,
+        urgency=session["urgency"],
+    )
+
+    return ConversationResponse(
+        response=clean_response,
+        language=request.language,
+        session_id=request.session_id,
+        conversation_state=new_state,
+        ready_for_contact=ready_for_contact,
+        urgency=session["urgency"],
+        detected_trade=session["detected_trade"],
+    )
+
+
+@router.delete("/conversation/{session_id}")
+async def end_conversation(session_id: str):
+    """End a conversation session and clean up."""
+    if session_id in _conversation_sessions:
+        del _conversation_sessions[session_id]
+        return {"status": "ended", "session_id": session_id}
+    return {"status": "not_found", "session_id": session_id}
+
+
+@router.get("/debug/sessions")
+async def debug_sessions():
+    """Debug endpoint to monitor conversation sessions.
+
+    Returns session count, memory estimate, and recent session IDs.
+    Useful for diagnosing memory leaks and stuck sessions.
+    """
+    now = time.time()
+
+    # Calculate memory estimate
+    memory_bytes = sum(
+        len(str(sess.get("messages", [])))
+        for sess in _conversation_sessions.values()
+    )
+
+    # Get session details
+    sessions_info = []
+    for sid, sess in list(_conversation_sessions.items())[-10:]:  # Last 10
+        age_seconds = now - sess.get("created_at", now)
+        idle_seconds = now - sess.get("last_access", now)
+        sessions_info.append({
+            "session_id": sid[:20] + "..." if len(sid) > 20 else sid,
+            "messages": len(sess.get("messages", [])),
+            "turn_count": sess.get("turn_count", 0),
+            "state": sess.get("state", "unknown"),
+            "age_minutes": round(age_seconds / 60, 1),
+            "idle_minutes": round(idle_seconds / 60, 1),
+        })
+
+    return {
+        "total_sessions": len(_conversation_sessions),
+        "max_sessions": MAX_SESSIONS,
+        "session_ttl_minutes": SESSION_TTL_SECONDS / 60,
+        "memory_estimate_kb": round(memory_bytes / 1024, 2),
+        "recent_sessions": sessions_info,
+    }

@@ -83,6 +83,11 @@ from phone_agent.db.models.handwerk import (
     QuoteModel,
 )
 
+# Elektro models
+from phone_agent.db.models.elektro import (
+    ConversationTranscriptModel,
+)
+
 # Multi-Tenant models
 from phone_agent.db.models.tenant import (
     TenantModel,
@@ -117,6 +122,8 @@ __all__ = [
     # Handwerk
     "JobModel",
     "QuoteModel",
+    # Elektro
+    "ConversationTranscriptModel",
     # Multi-Tenant
     "TenantModel",
     "DepartmentModel",
