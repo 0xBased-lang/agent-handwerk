@@ -367,7 +367,12 @@ class NotificationService:
         """
         if self.sms_provider == "mock":
             # Mock provider - just mark as sent
-            sms.mark_sent(provider_message_id=f"mock-{sms.id}")
+            provider_message_id = f"mock-{sms.id}"
+            update_data = {
+                "status": "sent",
+                "sent_at": datetime.now(timezone.utc),
+                "provider_message_id": provider_message_id,
+            }
             log.info(
                 "Mock SMS sent",
                 sms_id=str(sms.id),
@@ -378,14 +383,17 @@ class NotificationService:
             # TODO: Implement actual SMS provider integration
             # For twilio: use twilio client to send
             # For sipgate: use sipgate API
-            sms.mark_queued()
+            update_data = {
+                "status": "queued",
+                "queued_at": datetime.now(timezone.utc),
+            }
             log.info(
                 "SMS queued for sending",
                 sms_id=str(sms.id),
                 provider=self.sms_provider,
             )
 
-        await self.sms_repo.update(sms)
+        await self.sms_repo.update(sms.id, update_data)
 
 
 # Singleton instance
